@@ -1,20 +1,120 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Broken Bats CSC
 
-# Run and deploy your AI Studio app
+Full-stack website for the Broken Bats adult amateur baseball team in the Carolina Sandlot Collective.
 
-This contains everything you need to run your app locally.
+**Stack:** React 19 + Vite (frontend) / Hono on Cloudflare Workers (API) / D1 SQLite (database)
 
-View your app in AI Studio: https://ai.studio/apps/d76432f2-b64e-4d32-8482-5a98005625cc
+## Local Development
 
-## Run Locally
+**Prerequisites:** Node.js 18+, npm
 
-**Prerequisites:**  Node.js
+```bash
+npm install
+npm run dev
+```
 
+This starts Vite with the Cloudflare Workers runtime, giving you HMR for the React SPA and a local D1 database.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Setting Up the Local Database
+
+On first run, create and seed the local D1 database:
+
+```bash
+npm run db:schema:local
+npm run db:seed:local
+```
+
+## Deployment
+
+### 1. Authenticate with Cloudflare
+
+```bash
+npx wrangler login
+```
+
+### 2. Create the D1 Database
+
+```bash
+npx wrangler d1 create broken-bats-db
+```
+
+Copy the `database_id` from the output and paste it into `wrangler.jsonc`:
+
+```jsonc
+"database_id": "<YOUR_DATABASE_ID_HERE>"
+```
+
+### 3. Run Schema Migration & Seed
+
+```bash
+npm run db:schema
+npm run db:seed
+```
+
+### 4. Set Secrets
+
+Generate password hashes. For each password, get its SHA-256 hex digest and set it as a secret:
+
+```bash
+# Generate a hash (replace YOUR_PASSWORD with the actual password)
+echo -n "YOUR_PASSWORD" | shasum -a 256 | cut -d ' ' -f 1
+
+# Set the secrets
+npx wrangler secret put PLAYER_PASSWORD_HASH
+npx wrangler secret put ADMIN_PASSWORD_HASH
+npx wrangler secret put JWT_SECRET
+```
+
+- `PLAYER_PASSWORD_HASH` — SHA-256 hash of the team Clubhouse password
+- `ADMIN_PASSWORD_HASH` — SHA-256 hash of the Manager's Office password
+- `JWT_SECRET` — any random string used to sign auth tokens (e.g. `openssl rand -hex 32`)
+
+### 5. Deploy
+
+```bash
+npm run deploy
+```
+
+Your site will be live at `https://broken-bats-csc.<your-subdomain>.workers.dev`.
+
+### 6. Custom Domain
+
+1. Purchase your domain and add it to your Cloudflare account
+2. In the Cloudflare dashboard: **Workers & Pages** > **broken-bats-csc** > **Settings** > **Domains & Routes** > **Add Custom Domain**
+3. Cloudflare automatically provisions DNS records and SSL
+
+## Project Structure
+
+```
+src/                    React SPA
+  components/           Shared UI (Navbar, Ticker, LoginGate, Layout)
+  pages/                Route pages (Home, Clubhouse, Admin)
+  hooks/                React hooks (useAuth)
+  lib/                  Utilities (api client)
+worker/                 Cloudflare Worker (Hono API)
+  index.ts              Entry point — mounts all routes
+  routes/               API route handlers
+  middleware/            Auth middleware
+  db/                   SQL schema and seed files
+wrangler.jsonc          Cloudflare Worker + D1 configuration
+vite.config.ts          Vite + Cloudflare plugin config
+```
+
+## API Routes
+
+| Endpoint | Methods | Auth |
+|---|---|---|
+| `/api/ticker` | GET | Public |
+| `/api/roster` | GET | Public |
+| `/api/roster` | POST, PUT, DELETE | Admin |
+| `/api/schedule` | GET | Public |
+| `/api/schedule` | POST, PUT, DELETE | Admin |
+| `/api/media` | GET | Public |
+| `/api/rsvp` | GET, POST | Player |
+| `/api/posts` | GET, POST | Player |
+| `/api/dues` | GET | Player |
+| `/api/dues` | PUT | Admin |
+| `/api/fields` | GET | Public |
+| `/api/fields` | POST, PUT | Admin |
+| `/api/auth/login` | POST | Public |
+| `/api/auth/verify` | GET | Public |

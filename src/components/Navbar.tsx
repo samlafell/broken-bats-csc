@@ -1,14 +1,19 @@
 import { Link, useLocation } from 'react-router-dom';
-import { User, Settings } from 'lucide-react';
+import { User, Settings, LogOut } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useAuth } from '../hooks/useAuth';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 export default function Navbar() {
+  // #region agent log
+  fetch('http://127.0.0.1:7613/ingest/5b90fa54-6c67-43c2-9e12-8404ec8a797f',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'890096'},body:JSON.stringify({sessionId:'890096',location:'Navbar.tsx:render',message:'Navbar rendering',data:{clsxType:typeof clsx,twMergeType:typeof twMerge,linkType:typeof Link,useLocationType:typeof useLocation},timestamp:Date.now(),hypothesisId:'H2-H3'})}).catch(()=>{});
+  // #endregion
   const location = useLocation();
+  const { isAuthenticated, role, logout } = useAuth();
 
   const navLinks = [
     { name: 'Home', path: '/' },
@@ -65,6 +70,15 @@ export default function Navbar() {
             >
               <Settings className="w-4 h-4" />
             </Link>
+            {isAuthenticated && (
+              <button
+                onClick={logout}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-stone-500 hover:bg-stone-800 hover:text-stone-300 transition-colors"
+                title={`Logged in as ${role} — click to log out`}
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       </div>

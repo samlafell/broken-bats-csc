@@ -1,22 +1,46 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { MapPin, Calendar, ArrowRight, Download } from 'lucide-react';
+import { api } from '../lib/api';
 
-const ROSTER = [
-  { name: 'Jimmy "Wheels" Carter', position: 'CF', avg: '.342', funStat: 'Pulled Hamstrings: 2', image: 'https://picsum.photos/seed/jimmy/400/500' },
-  { name: 'Dave "The Wall" Smith', position: 'C', avg: '.280', funStat: 'Kids: 3', image: 'https://picsum.photos/seed/dave/400/500' },
-  { name: 'Mike "Laser" Johnson', position: 'SS', avg: '.310', funStat: 'Day Job: Accountant', image: 'https://picsum.photos/seed/mike/400/500' },
-  { name: 'Tom "Big Fly" Davis', position: '1B', avg: '.295', funStat: 'Broken Bats: 4', image: 'https://picsum.photos/seed/tom/400/500' },
-];
+interface Player {
+  id: number;
+  name: string;
+  nickname: string | null;
+  position: string;
+  batting_avg: string;
+  fun_stat: string | null;
+  image_url: string | null;
+  status: string;
+}
 
-const MEDIA_ASSETS = [
-  { name: 'Primary Logo', type: 'SVG', size: '12 KB' },
-  { name: 'Cap Insignia', type: 'SVG', size: '8 KB' },
-  { name: 'Wordmark', type: 'SVG', size: '15 KB' },
-];
+interface Game {
+  id: number;
+  opponent: string;
+  date: string;
+  time: string;
+  location: string;
+  field_name: string | null;
+}
+
+interface MediaAsset {
+  id: number;
+  name: string;
+  file_type: string;
+  file_size: string | null;
+}
 
 export default function Home() {
   const location = useLocation();
+  const [roster, setRoster] = useState<Player[]>([]);
+  const [nextGame, setNextGame] = useState<Game | null>(null);
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
+
+  useEffect(() => {
+    api<Player[]>('/roster').then(setRoster).catch(console.error);
+    api<Game | null>('/schedule?next=true').then(setNextGame).catch(console.error);
+    api<MediaAsset[]>('/media').then(setMediaAssets).catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (location.hash) {
@@ -29,6 +53,14 @@ export default function Home() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [location]);
+
+  const displayName = (p: Player) =>
+    p.nickname ? `${p.name.split(' ')[0]} "${p.nickname}" ${p.name.split(' ').slice(1).join(' ')}` : p.name;
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  };
 
   return (
     <div className="pb-24">
@@ -49,12 +81,12 @@ export default function Home() {
             Defending the Carolina Sandlot Collective (CSC) Championship. Cold beers, pulled muscles, and pure baseball.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button className="px-8 py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-full uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
+            <a href="#schedule" className="px-8 py-4 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-full uppercase tracking-widest transition-transform hover:scale-105 active:scale-95">
               View Schedule
-            </button>
-            <button className="px-8 py-4 bg-stone-800 hover:bg-stone-700 text-white font-bold rounded-full uppercase tracking-widest transition-colors">
+            </a>
+            <a href="#roster" className="px-8 py-4 bg-stone-800 hover:bg-stone-700 text-white font-bold rounded-full uppercase tracking-widest transition-colors">
               Meet the Team
-            </button>
+            </a>
           </div>
         </div>
       </section>
@@ -62,32 +94,40 @@ export default function Home() {
       {/* Next Game Card */}
       <section id="schedule" className="max-w-5xl mx-auto px-4 -mt-20 relative z-20 scroll-mt-24">
         <div className="bg-stone-900 border border-stone-800 rounded-2xl p-6 md:p-10 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 text-amber-500 font-bold uppercase tracking-wider text-sm mb-4">
-              <Calendar className="w-4 h-4" />
-              <span>Next Matchup</span>
+          {nextGame ? (
+            <>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 text-amber-500 font-bold uppercase tracking-wider text-sm mb-4">
+                  <Calendar className="w-4 h-4" />
+                  <span>Next Matchup</span>
+                </div>
+                <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tight mb-2">
+                  Broken Bats <span className="text-stone-500">vs</span> {nextGame.opponent}
+                </h2>
+                <div className="flex items-center gap-4 text-stone-400 font-medium">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-4 h-4" /> {formatDate(nextGame.date)} @ {nextGame.time}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-4 h-4" /> {nextGame.location}{nextGame.field_name ? `, ${nextGame.field_name}` : ''}
+                  </span>
+                </div>
+              </div>
+              <div className="flex-shrink-0 w-full md:w-auto">
+                <a 
+                  href="#" 
+                  className="flex items-center justify-center gap-2 w-full md:w-auto px-6 py-4 bg-stone-800 hover:bg-stone-700 rounded-xl font-bold uppercase tracking-wider transition-colors"
+                >
+                  <MapPin className="w-5 h-5" />
+                  Get Directions
+                </a>
+              </div>
+            </>
+          ) : (
+            <div className="text-center w-full py-4">
+              <p className="text-stone-400">No upcoming games scheduled.</p>
             </div>
-            <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tight mb-2">
-              Broken Bats <span className="text-stone-500">vs</span> Yankees
-            </h2>
-            <div className="flex items-center gap-4 text-stone-400 font-medium">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-4 h-4" /> Saturday, April 12 @ 10:00 AM
-              </span>
-              <span className="flex items-center gap-1">
-                <MapPin className="w-4 h-4" /> Centennial Park, Field 4
-              </span>
-            </div>
-          </div>
-          <div className="flex-shrink-0 w-full md:w-auto">
-            <a 
-              href="#" 
-              className="flex items-center justify-center gap-2 w-full md:w-auto px-6 py-4 bg-stone-800 hover:bg-stone-700 rounded-xl font-bold uppercase tracking-wider transition-colors"
-            >
-              <MapPin className="w-5 h-5" />
-              Get Directions
-            </a>
-          </div>
+          )}
         </div>
       </section>
 
@@ -101,11 +141,11 @@ export default function Home() {
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {ROSTER.map((player) => (
-            <div key={player.name} className="group relative bg-stone-900 rounded-2xl overflow-hidden border border-stone-800 hover:border-stone-700 transition-colors">
+          {roster.filter(p => p.status === 'Active').slice(0, 4).map((player) => (
+            <div key={player.id} className="group relative bg-stone-900 rounded-2xl overflow-hidden border border-stone-800 hover:border-stone-700 transition-colors">
               <div className="aspect-[3/4] overflow-hidden relative">
                 <img 
-                  src={player.image} 
+                  src={player.image_url ?? `https://picsum.photos/seed/${player.id}/400/500`} 
                   alt={player.name} 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   referrerPolicy="no-referrer"
@@ -114,13 +154,15 @@ export default function Home() {
                 <div className="absolute bottom-0 left-0 p-6 w-full">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-amber-500 font-black text-2xl">{player.position}</span>
-                    <span className="text-stone-300 font-mono text-sm">AVG {player.avg}</span>
+                    <span className="text-stone-300 font-mono text-sm">AVG {player.batting_avg}</span>
                   </div>
-                  <h3 className="text-xl font-bold uppercase tracking-tight mb-2">{player.name}</h3>
-                  <div className="bg-stone-950/80 backdrop-blur-sm rounded-lg p-3 border border-stone-800">
-                    <span className="text-xs text-stone-400 uppercase tracking-wider block mb-1">Scouting Report</span>
-                    <span className="text-sm font-medium text-stone-200">{player.funStat}</span>
-                  </div>
+                  <h3 className="text-xl font-bold uppercase tracking-tight mb-2">{displayName(player)}</h3>
+                  {player.fun_stat && (
+                    <div className="bg-stone-950/80 backdrop-blur-sm rounded-lg p-3 border border-stone-800">
+                      <span className="text-xs text-stone-400 uppercase tracking-wider block mb-1">Scouting Report</span>
+                      <span className="text-sm font-medium text-stone-200">{player.fun_stat}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -138,10 +180,9 @@ export default function Home() {
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          {MEDIA_ASSETS.map((asset) => (
-            <div key={asset.name} className="bg-stone-900 border border-stone-800 rounded-2xl p-6 flex flex-col items-center text-center group hover:border-amber-500/50 transition-colors">
+          {mediaAssets.map((asset) => (
+            <div key={asset.id} className="bg-stone-900 border border-stone-800 rounded-2xl p-6 flex flex-col items-center text-center group hover:border-amber-500/50 transition-colors">
               <div className="w-24 h-24 bg-stone-950 rounded-xl border border-stone-800 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                {/* Placeholder for actual SVG */}
                 <div className="w-12 h-12 text-amber-500">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
@@ -150,7 +191,7 @@ export default function Home() {
                 </div>
               </div>
               <h3 className="text-lg font-bold uppercase tracking-tight mb-1">{asset.name}</h3>
-              <p className="text-stone-500 text-sm font-mono mb-6">{asset.type} • {asset.size}</p>
+              <p className="text-stone-500 text-sm font-mono mb-6">{asset.file_type}{asset.file_size ? ` • ${asset.file_size}` : ''}</p>
               <button className="flex items-center gap-2 px-4 py-2 bg-stone-800 hover:bg-amber-600 hover:text-white text-stone-300 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors w-full justify-center">
                 <Download className="w-4 h-4" /> Download
               </button>
