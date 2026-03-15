@@ -43,6 +43,32 @@ interface Game {
   score_them: number | null;
 }
 
+const TIME_OPTIONS = Array.from({ length: 33 }, (_, i) => {
+  const totalMin = 6 * 60 + i * 30;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const h24 = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const label = `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
+  return { value: h24, label };
+});
+
+function parseTimeSlot(slot: string): [string, string] {
+  const parse12 = (s: string): string => {
+    const match = s.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+    if (!match) return '00:00';
+    let h = parseInt(match[1], 10);
+    const m = match[2];
+    const period = match[3].toLowerCase();
+    if (period === 'pm' && h !== 12) h += 12;
+    if (period === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m}`;
+  };
+  const parts = slot.split('-');
+  return [parse12(parts[0]), parse12(parts[1] ?? parts[0])];
+}
+
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<'roster' | 'fields' | 'schedule'>('roster');
   const [rosterData, setRosterData] = useState<Player[]>([]);
@@ -51,6 +77,9 @@ export default function Admin() {
   const [scheduleData, setScheduleData] = useState<Game[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [fieldFilter, setFieldFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState('');
+  const [timeStart, setTimeStart] = useState('');
+  const [timeEnd, setTimeEnd] = useState('');
   const [showNewGameForm, setShowNewGameForm] = useState(false);
   const [newGame, setNewGame] = useState({ opponent: '', date: '', time: '', location: '', field_name: '' });
 
@@ -70,18 +99,6 @@ export default function Admin() {
 
   const handleRemind = async (player: Player) => {
     alert(`Reminder sent to ${player.name}!`);
-  };
-
-  const handleBookField = async (field: Field) => {
-    try {
-      await api(`/fields/${field.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ status: 'Booked' }),
-      });
-      loadData();
-    } catch (err) {
-      console.error('Booking failed:', err);
-    }
   };
 
   const handleCreateGame = async (e: React.FormEvent) => {
@@ -118,10 +135,20 @@ export default function Admin() {
     [fieldData]
   );
 
-  const filteredFields = useMemo(
-    () => fieldFilter === 'all' ? fieldData : fieldData.filter((f) => f.name === fieldFilter),
-    [fieldData, fieldFilter]
-  );
+  const filteredFields = useMemo(() => {
+    let data = fieldData;
+    if (fieldFilter !== 'all') data = data.filter((f) => f.name === fieldFilter);
+    if (dateFilter) data = data.filter((f) => f.date === dateFilter);
+    if (timeStart || timeEnd) {
+      data = data.filter((f) => {
+        const [slotStart, slotEnd] = parseTimeSlot(f.time_slot);
+        if (timeStart && slotEnd <= timeStart) return false;
+        if (timeEnd && slotStart >= timeEnd) return false;
+        return true;
+      });
+    }
+    return data;
+  }, [fieldData, fieldFilter, dateFilter, timeStart, timeEnd]);
 
   const fieldsByDate = useMemo(() => {
     const grouped = new Map<string, Field[]>();
@@ -268,31 +295,90 @@ export default function Admin() {
 
         {activeTab === 'fields' && (
           <div>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold uppercase tracking-tight mb-1">Field Scout</h2>
-                <p className="text-sm text-stone-400">Automated scraper results from Raleigh Parks & Rec.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
-                  <select
-                    value={fieldFilter}
-                    onChange={(e) => setFieldFilter(e.target.value)}
-                    className="appearance-none bg-stone-950 border border-stone-800 rounded-lg pl-9 pr-8 py-1.5 text-xs font-mono focus:outline-none focus:border-stone-600"
-                  >
-                    <option value="all">All Fields</option>
-                    {uniqueFieldNames.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold uppercase tracking-tight mb-1">Field Scout</h2>
+                  <p className="text-sm text-stone-400">Automated scraper results from Raleigh Parks & Rec.</p>
                 </div>
                 <span className="text-xs font-mono text-stone-500 bg-stone-950 px-3 py-1.5 rounded-full border border-stone-800 whitespace-nowrap">
                   {lastScraped
                     ? `Scraped: ${new Date(lastScraped + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' })} ${new Date(lastScraped + 'Z').toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}`
                     : 'No data yet'}
                 </span>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-stone-500">Field</label>
+                  <div className="relative">
+                    <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" />
+                    <select
+                      value={fieldFilter}
+                      onChange={(e) => setFieldFilter(e.target.value)}
+                      className="appearance-none bg-stone-950 border border-stone-800 rounded-lg pl-9 pr-8 py-1.5 text-xs font-mono focus:outline-none focus:border-stone-600"
+                    >
+                      <option value="all">All Fields</option>
+                      {uniqueFieldNames.map((name) => (
+                        <option key={name} value={name}>{name}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-stone-500">Date</label>
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => setDateFilter(e.target.value)}
+                    className="bg-stone-950 border border-stone-800 rounded-lg px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-stone-600"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-stone-500">From</label>
+                  <div className="relative">
+                    <select
+                      value={timeStart}
+                      onChange={(e) => setTimeStart(e.target.value)}
+                      className="appearance-none bg-stone-950 border border-stone-800 rounded-lg pl-3 pr-7 py-1.5 text-xs font-mono focus:outline-none focus:border-stone-600"
+                    >
+                      <option value="">Any</option>
+                      {TIME_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-stone-500">To</label>
+                  <div className="relative">
+                    <select
+                      value={timeEnd}
+                      onChange={(e) => setTimeEnd(e.target.value)}
+                      className="appearance-none bg-stone-950 border border-stone-800 rounded-lg pl-3 pr-7 py-1.5 text-xs font-mono focus:outline-none focus:border-stone-600"
+                    >
+                      <option value="">Any</option>
+                      {TIME_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+                  </div>
+                </div>
+
+                {(fieldFilter !== 'all' || dateFilter || timeStart || timeEnd) && (
+                  <button
+                    onClick={() => { setFieldFilter('all'); setDateFilter(''); setTimeStart(''); setTimeEnd(''); }}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors"
+                  >
+                    <X className="w-3 h-3" /> Clear
+                  </button>
+                )}
               </div>
             </div>
 
@@ -362,14 +448,6 @@ export default function Admin() {
                       <div className="flex items-center gap-2 text-sm text-stone-400">
                         <Clock className="w-4 h-4" /> {field.time_slot}
                       </div>
-                      {field.status === 'Available' && (
-                        <button
-                          onClick={() => handleBookField(field)}
-                          className="w-full mt-4 py-2 bg-stone-800 hover:bg-stone-700 text-white rounded-lg text-sm font-bold uppercase tracking-wider transition-colors"
-                        >
-                          Book Field
-                        </button>
-                      )}
                     </div>
                   ))}
                 </div>

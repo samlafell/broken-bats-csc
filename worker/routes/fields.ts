@@ -28,37 +28,6 @@ fields.post('/', requireAuth('admin'), async (c) => {
   return c.json({ id: result.meta.last_row_id }, 201);
 });
 
-fields.put('/:id', requireAuth('admin'), async (c) => {
-  const id = c.req.param('id');
-  const body = await c.req.json<{
-    name?: string;
-    date?: string;
-    time_slot?: string;
-    status?: string;
-  }>();
-
-  const fieldList: string[] = [];
-  const values: unknown[] = [];
-
-  for (const [key, val] of Object.entries(body)) {
-    if (val !== undefined) {
-      fieldList.push(`${key} = ?`);
-      values.push(val);
-    }
-  }
-
-  if (fieldList.length === 0) return c.json({ error: 'No fields to update' }, 400);
-
-  fieldList.push("last_updated = datetime('now')");
-  values.push(id);
-
-  await c.env.DB.prepare(`UPDATE fields SET ${fieldList.join(', ')} WHERE id = ?`)
-    .bind(...values)
-    .run();
-
-  return c.json({ success: true });
-});
-
 // --- Field Bot endpoints ---
 
 fields.post('/import', requireAuth('admin'), async (c) => {
@@ -99,12 +68,6 @@ fields.post('/import', requireAuth('admin'), async (c) => {
     .run();
 
   return c.json({ imported: body.results.length, targetDate: body.targetDate, status: runStatus });
-});
-
-fields.post('/scrape', requireAuth('admin'), async (c) => {
-  const { runFieldBot } = await import('../scraper/field-bot');
-  const result = await runFieldBot(c.env);
-  return c.json(result);
 });
 
 fields.get('/scrape-runs', requireAuth('admin'), async (c) => {

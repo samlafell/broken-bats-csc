@@ -27,12 +27,4 @@ app.route('/media', media);
 
 export default {
   fetch: app.fetch,
-  async scheduled(
-    _event: ScheduledEvent,
-    env: Bindings,
-    ctx: ExecutionContext
-  ) {
-    const { runFieldBot } = await import('./scraper/field-bot');
-    ctx.waitUntil(runFieldBot(env));
-  },
 };

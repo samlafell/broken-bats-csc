@@ -23,14 +23,6 @@
 			"database_id": "b595e191-bc9d-40c7-95ad-6351e20028da"
 		}
 	],
-	"browser": {
-		"binding": "BROWSER"
-	},
-	"triggers": {
-		"crons": [
-			"0 11 * * *"
-		]
-	},
 	"workers_dev": true,
 	"routes": [
 		{ "pattern": "cscbrokenbats.org", "custom_domain": true },
