@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS scrape_runs;
+DROP TABLE IF EXISTS dim_field_locations;
 DROP TABLE IF EXISTS rsvps;
 DROP TABLE IF EXISTS dues;
 DROP TABLE IF EXISTS posts;
@@ -74,6 +75,12 @@ CREATE TABLE media_assets (
   file_type TEXT NOT NULL,
   file_size TEXT,
   download_url TEXT
+);
+
+CREATE TABLE dim_field_locations (
+  field_name TEXT PRIMARY KEY,
+  map_url TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE scrape_runs (

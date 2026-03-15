@@ -5,9 +5,11 @@ import { requireAuth } from '../middleware/auth';
 const fields = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 fields.get('/', async (c) => {
-  const { results } = await c.env.DB.prepare(
-    'SELECT * FROM fields ORDER BY date ASC, time_slot ASC'
-  ).all();
+  const date = c.req.query('date');
+  const query = date
+    ? c.env.DB.prepare('SELECT * FROM fields WHERE date = ? ORDER BY date ASC, time_slot ASC').bind(date)
+    : c.env.DB.prepare('SELECT * FROM fields ORDER BY date ASC, time_slot ASC');
+  const { results } = await query.all();
   return c.json(results);
 });
 
@@ -36,6 +38,7 @@ fields.post('/import', requireAuth('admin'), async (c) => {
     durationMs?: number;
     log?: string[];
     results: { fieldName: string; timeSlot: string; status: 'Available' | 'Booked' }[];
+    locations?: { fieldName: string; mapUrl: string }[];
   }>();
 
   if (!body.targetDate || !Array.isArray(body.results)) {
@@ -53,6 +56,14 @@ fields.post('/import', requireAuth('admin'), async (c) => {
     await c.env.DB.batch(batch);
   }
 
+  if (body.locations && body.locations.length > 0) {
+    const locStmt = c.env.DB.prepare(
+      `INSERT OR IGNORE INTO dim_field_locations (field_name, map_url) VALUES (?, ?)`
+    );
+    const locBatch = body.locations.map((l) => locStmt.bind(l.fieldName, l.mapUrl));
+    await c.env.DB.batch(locBatch);
+  }
+
   const runStatus = body.results.length > 0 ? 'success' : 'partial';
   await c.env.DB.prepare(
     `INSERT INTO scrape_runs (target_date, status, slots_found, duration_ms, log)
@@ -68,6 +79,13 @@ fields.post('/import', requireAuth('admin'), async (c) => {
     .run();
 
   return c.json({ imported: body.results.length, targetDate: body.targetDate, status: runStatus });
+});
+
+fields.get('/locations', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    'SELECT field_name, map_url FROM dim_field_locations ORDER BY field_name'
+  ).all();
+  return c.json(results);
 });
 
 fields.get('/scrape-runs', requireAuth('admin'), async (c) => {

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brokenbats.discordbot</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/samlafell/.nvm/versions/node/v22.12.0/bin/node</string>
+    <string>/Users/samlafell/Documents/programming_projects/broken-bats-csc/scripts/discord-bot.mjs</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/samlafell/Documents/programming_projects/broken-bats-csc</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DISCORD_BOT_TOKEN</key>
+    <string>YOUR_DISCORD_BOT_TOKEN</string>
+    <key>DISCORD_GUILD_ID</key>
+    <string>YOUR_DISCORD_GUILD_ID</string>
+    <key>ADMIN_PASSWORD</key>
+    <string>admin123</string>
+    <key>PATH</key>
+    <string>/Users/samlafell/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Keep the bot running — restart on crash -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/samlafell/Library/Logs/discord-bot.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/samlafell/Library/Logs/discord-bot.log</string>
+</dict>
+</plist>

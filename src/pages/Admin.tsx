@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Calendar, Map as MapIcon, Bell, Search, Plus, Clock, X, Save, Trash2, Filter, ChevronDown } from 'lucide-react';
+import { Users, Calendar, Map as MapIcon, MapPin, Bell, Search, Plus, Clock, X, Save, Trash2, Filter, ChevronDown } from 'lucide-react';
 import { api } from '../lib/api';
 
 interface Player {
@@ -43,6 +43,11 @@ interface Game {
   score_them: number | null;
 }
 
+interface FieldLocation {
+  field_name: string;
+  map_url: string;
+}
+
 const TIME_OPTIONS = Array.from({ length: 33 }, (_, i) => {
   const totalMin = 6 * 60 + i * 30;
   const h = Math.floor(totalMin / 60);
@@ -75,6 +80,7 @@ export default function Admin() {
   const [duesData, setDuesData] = useState<DuesRecord[]>([]);
   const [fieldData, setFieldData] = useState<Field[]>([]);
   const [scheduleData, setScheduleData] = useState<Game[]>([]);
+  const [fieldLocations, setFieldLocations] = useState<FieldLocation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [fieldFilter, setFieldFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState('');
@@ -91,6 +97,7 @@ export default function Admin() {
     api<Player[]>('/roster').then(setRosterData).catch(console.error);
     api<DuesRecord[]>('/dues').then(setDuesData).catch(console.error);
     api<Field[]>('/fields').then(setFieldData).catch(console.error);
+    api<FieldLocation[]>('/fields/locations').then(setFieldLocations).catch(console.error);
     api<Game[]>('/schedule').then(setScheduleData).catch(console.error);
   };
 
@@ -178,6 +185,11 @@ export default function Admin() {
     }
     return summary;
   }, [fieldData]);
+
+  const fieldLocationMap = useMemo(
+    () => new Map(fieldLocations.map((l) => [l.field_name, l.map_url])),
+    [fieldLocations]
+  );
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
@@ -448,6 +460,16 @@ export default function Admin() {
                       <div className="flex items-center gap-2 text-sm text-stone-400">
                         <Clock className="w-4 h-4" /> {field.time_slot}
                       </div>
+                      {fieldLocationMap.get(field.name) && (
+                        <a
+                          href={fieldLocationMap.get(field.name)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs text-stone-400 hover:text-amber-500 mt-2 transition-colors"
+                        >
+                          <MapPin className="w-3.5 h-3.5" /> View Map
+                        </a>
+                      )}
                     </div>
                   ))}
                 </div>

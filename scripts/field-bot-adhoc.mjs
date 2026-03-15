@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Field Bot (Local) — Runs Puppeteer on the Mac Mini to scrape Raleigh Parks
- * WebTrac for baseball field availability 15 days out, then pushes results to
- * the Broken Bats API.
+ * Ad-hoc Field Scraper — Scrapes Raleigh Parks WebTrac for a specific date.
  *
- * See docs/webtrac-scraping.md for full site-structure reference.
+ * Unlike field-bot-local.mjs (daily cron), this module exports a
+ * `scrapeForDate()` function that the Discord bot can call on demand.
+ * It also works standalone: `node scripts/field-bot-adhoc.mjs 2026-04-15`
  *
  * Env vars:
  *   ADMIN_PASSWORD  (required) — Admin password for the Broken Bats API
@@ -15,10 +15,6 @@
 
 import puppeteer from 'puppeteer';
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
 const TRACKED_FIELDS = [
   'Baileywick 1', 'Baileywick 2', 'Cedar Hills',
   'Green Road 1', 'Green Road 2', 'Honeycutt',
@@ -27,40 +23,7 @@ const TRACKED_FIELDS = [
 ];
 
 const WEBTRAC_BASE = 'https://ncraleighweb.myvscloud.com/webtrac/web';
-const SITE_URL = process.env.SITE_URL || 'https://cscbrokenbats.org';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const HEADLESS = process.env.HEADLESS !== 'false';
 const MAX_PAGES = 5;
-
-// ---------------------------------------------------------------------------
-// Logging
-// ---------------------------------------------------------------------------
-
-const entries = [];
-function info(msg)  { entries.push(`[INFO] ${msg}`);  console.log(`[field-bot] ${msg}`); }
-function warn(msg)  { entries.push(`[WARN] ${msg}`);  console.warn(`[field-bot] ${msg}`); }
-function error(msg) { entries.push(`[ERROR] ${msg}`); console.error(`[field-bot] ${msg}`); }
-
-// ---------------------------------------------------------------------------
-// Date helpers
-// ---------------------------------------------------------------------------
-
-function getTargetDate() {
-  const now = new Date();
-  const eastern = new Date(
-    now.toLocaleString('en-US', { timeZone: 'America/New_York' })
-  );
-  eastern.setDate(eastern.getDate() + 14);
-
-  const year = eastern.getFullYear();
-  const month = String(eastern.getMonth() + 1).padStart(2, '0');
-  const day = String(eastern.getDate()).padStart(2, '0');
-
-  return {
-    isoDate: `${year}-${month}-${day}`,
-    usDate: `${month}/${day}/${year}`,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Parse one page of results (runs inside page.evaluate)
@@ -89,7 +52,6 @@ function parseResultsInBrowser(trackedFields) {
       locations.push({ fieldName: matched, mapUrl: mapLink.href });
     }
 
-    // Available / booked <a> tags
     const slotLinks = block.querySelectorAll('a.cart-button--state-block');
     for (const link of slotLinks) {
       const timeText = link.textContent.trim();
@@ -102,7 +64,6 @@ function parseResultsInBrowser(trackedFields) {
       });
     }
 
-    // Unavailable <span> pairs (fallback pattern)
     const spans = block.querySelectorAll('span');
     for (let i = 0; i < spans.length; i++) {
       const spanText = spans[i].textContent.trim();
@@ -122,22 +83,54 @@ function parseResultsInBrowser(trackedFields) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// ISO → US date format
 // ---------------------------------------------------------------------------
 
-async function main() {
-  if (!ADMIN_PASSWORD) {
-    console.error('ADMIN_PASSWORD env var is required');
-    process.exit(1);
+function isoToUs(isoDate) {
+  const [year, month, day] = isoDate.split('-');
+  return `${month}/${day}/${year}`;
+}
+
+// ---------------------------------------------------------------------------
+// Core scraping function
+// ---------------------------------------------------------------------------
+
+/**
+ * Scrape WebTrac for a specific date and push results to the Broken Bats API.
+ *
+ * @param {string} isoDate  Target date in YYYY-MM-DD format
+ * @param {object} [opts]
+ * @param {string} [opts.siteUrl]        API base URL (default: env SITE_URL)
+ * @param {string} [opts.adminPassword]  Admin password (default: env ADMIN_PASSWORD)
+ * @param {boolean} [opts.headless]      Run headless (default: env HEADLESS)
+ * @param {boolean} [opts.pushToApi]     Push results to the API (default: true)
+ * @returns {Promise<{ results: Array, locations: Array, log: string[] }>}
+ */
+export async function scrapeForDate(isoDate, opts = {}) {
+  const siteUrl = opts.siteUrl || process.env.SITE_URL || 'https://cscbrokenbats.org';
+  const adminPassword = opts.adminPassword || process.env.ADMIN_PASSWORD;
+  const headless = opts.headless ?? (process.env.HEADLESS !== 'false');
+  const pushToApi = opts.pushToApi ?? true;
+
+  if (pushToApi && !adminPassword) {
+    throw new Error('ADMIN_PASSWORD is required when pushToApi is true');
   }
 
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+    throw new Error(`Invalid date format "${isoDate}" — expected YYYY-MM-DD`);
+  }
+
+  const usDate = isoToUs(isoDate);
+  const log = [];
+  const _info = (msg) => { log.push(`[INFO] ${msg}`); console.log(`[adhoc-scrape] ${msg}`); };
+  const _warn = (msg) => { log.push(`[WARN] ${msg}`); console.warn(`[adhoc-scrape] ${msg}`); };
+  const _error = (msg) => { log.push(`[ERROR] ${msg}`); console.error(`[adhoc-scrape] ${msg}`); };
+
   const startTime = Date.now();
-  const { isoDate, usDate } = getTargetDate();
-  info(`Target date: ${isoDate} (${usDate})`);
-  info(`Headless: ${HEADLESS}`);
+  _info(`Target date: ${isoDate} (${usDate})`);
 
   const browser = await puppeteer.launch({
-    headless: HEADLESS ? 'new' : false,
+    headless: headless ? 'new' : false,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
 
@@ -148,8 +141,7 @@ async function main() {
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // ----- Step 1: Load initial page to get CSRF token ----- //
-    info('Step 1: Loading initial search page...');
+    _info('Loading initial search page...');
     await page.goto(
       `${WEBTRAC_BASE}/search.html?module=FR&display=detail`,
       { waitUntil: 'networkidle2', timeout: 60_000 }
@@ -166,13 +158,12 @@ async function main() {
       });
     }
     if (!csrfToken) {
-      error('Could not find CSRF token');
+      _error('Could not find CSRF token');
       throw new Error('Missing CSRF token');
     }
-    info(`Got CSRF token: ${csrfToken.substring(0, 20)}...`);
+    _info(`Got CSRF token: ${csrfToken.substring(0, 20)}...`);
 
-    // ----- Step 2: Navigate to search results with Athletic Field filter ----- //
-    info('Step 2: Submitting search with category=Athletic Field...');
+    _info('Submitting search with category=Athletic Field...');
     const searchParams = new URLSearchParams({
       Action: 'Start',
       SubAction: '',
@@ -202,10 +193,7 @@ async function main() {
       `${WEBTRAC_BASE}/search.html?${searchParams.toString()}`,
       { waitUntil: 'networkidle2', timeout: 60_000 }
     );
-    info(`Search page loaded — "${await page.title()}"`);
-
-    // ----- Step 3: Parse results across all pages ----- //
-    info('Step 3: Parsing results...');
+    _info(`Search page loaded — "${await page.title()}"`);
 
     for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
       await page.waitForSelector('div.result-content', { timeout: 15_000 }).catch(() => null);
@@ -221,10 +209,7 @@ async function main() {
         }
       }
 
-      info(`Page ${pageNum}: ${allNames.length} facilities, ${results.length} matched slots`);
-      if (allNames.length > 0) {
-        info(`  Facilities: ${allNames.join(', ')}`);
-      }
+      _info(`Page ${pageNum}: ${allNames.length} facilities, ${results.length} matched slots`);
 
       const matched = results.filter(
         (r) => !allResults.some(
@@ -233,9 +218,6 @@ async function main() {
       );
       allResults.push(...matched);
 
-      // Try to click the next page button
-      // Pagination: <ul class="paging"> with <button class="paging__button" data-click-set-value="N">
-      // Current page button has additional class "primary"
       const nextPage = pageNum + 1;
       const pagingInfo = await page.evaluate((targetPage) => {
         const pagingUl = document.querySelector('ul.paging');
@@ -247,84 +229,91 @@ async function main() {
             && !b.classList.contains('paging__lastpage')
         );
 
-        if (!nextBtn) return {
-          found: false,
-          reason: 'no button for target page',
-          buttonValues: allButtons.map((b) => b.getAttribute('data-click-set-value')),
-        };
+        if (!nextBtn) return { found: false, reason: 'no button for target page' };
 
         nextBtn.click();
         return { found: true, clickedPage: targetPage };
       }, nextPage);
 
       if (!pagingInfo.found) {
-        info(`  No more pages after page ${pageNum} (${pagingInfo.reason})`);
+        _info(`No more pages after page ${pageNum}`);
         break;
       }
 
-      info(`  Navigating to page ${nextPage}...`);
+      _info(`Navigating to page ${nextPage}...`);
       await page.waitForNetworkIdle({ timeout: 15_000 }).catch(() => {});
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    info(`Total: ${allResults.length} time slots across all pages`);
-    if (allResults.length > 0) {
-      const avail = allResults.filter((r) => r.status === 'Available').length;
-      const booked = allResults.filter((r) => r.status === 'Booked').length;
-      info(`Breakdown: ${avail} available, ${booked} booked`);
-      const fields = [...new Set(allResults.map((r) => r.fieldName))];
-      info(`Fields found: ${fields.join(', ')}`);
-    } else {
-      warn('Zero slots found — check docs/webtrac-scraping.md for debugging');
-    }
+    const avail = allResults.filter((r) => r.status === 'Available').length;
+    const booked = allResults.filter((r) => r.status === 'Booked').length;
+    _info(`Total: ${allResults.length} slots (${avail} available, ${booked} booked)`);
   } finally {
     await browser.close();
-    info('Browser closed');
+    _info('Browser closed');
   }
 
-  // ----- Step 4: Push results to the Broken Bats API ----- //
   const durationMs = Date.now() - startTime;
-  info(`Scrape took ${durationMs}ms — pushing to API...`);
+  const locationsArr = [...locationMap.entries()].map(([fieldName, mapUrl]) => ({ fieldName, mapUrl }));
 
-  const loginRes = await fetch(`${SITE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: ADMIN_PASSWORD, role: 'admin' }),
-  });
+  if (pushToApi) {
+    _info(`Scrape took ${durationMs}ms — pushing to API...`);
 
-  if (!loginRes.ok) {
-    error(`Login failed: ${loginRes.status} ${await loginRes.text()}`);
-    process.exit(1);
+    const loginRes = await fetch(`${siteUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: adminPassword, role: 'admin' }),
+    });
+
+    if (!loginRes.ok) {
+      const body = await loginRes.text();
+      _error(`Login failed: ${loginRes.status} ${body}`);
+      throw new Error(`API login failed: ${loginRes.status}`);
+    }
+
+    const { token } = await loginRes.json();
+    _info('Authenticated with API');
+
+    const importRes = await fetch(`${siteUrl}/api/fields/import`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        targetDate: isoDate,
+        durationMs,
+        log,
+        results: allResults,
+        locations: locationsArr,
+      }),
+    });
+
+    if (!importRes.ok) {
+      const body = await importRes.text();
+      _error(`Import failed: ${importRes.status} ${body}`);
+      throw new Error(`API import failed: ${importRes.status}`);
+    }
+
+    const importData = await importRes.json();
+    _info(`Import complete: ${JSON.stringify(importData)}`);
   }
 
-  const { token } = await loginRes.json();
-  info('Authenticated with API');
-
-  const importRes = await fetch(`${SITE_URL}/api/fields/import`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      targetDate: isoDate,
-      durationMs,
-      log: entries,
-      results: allResults,
-      locations: [...locationMap.entries()].map(([fieldName, mapUrl]) => ({ fieldName, mapUrl })),
-    }),
-  });
-
-  if (!importRes.ok) {
-    error(`Import failed: ${importRes.status} ${await importRes.text()}`);
-    process.exit(1);
-  }
-
-  const importData = await importRes.json();
-  info(`Import complete: ${JSON.stringify(importData)}`);
+  return { results: allResults, locations: locationsArr, log, durationMs };
 }
 
-main().catch((err) => {
-  error(`Fatal: ${err.message}\n${err.stack}`);
-  process.exit(1);
-});
+// ---------------------------------------------------------------------------
+// CLI entry point: node scripts/field-bot-adhoc.mjs 2026-04-15
+// ---------------------------------------------------------------------------
+
+const isMain = !process.argv[1] || process.argv[1].endsWith('field-bot-adhoc.mjs');
+if (isMain && process.argv[2]) {
+  scrapeForDate(process.argv[2])
+    .then(({ results }) => {
+      console.log(`\nDone — ${results.length} slots scraped.`);
+    })
+    .catch((err) => {
+      console.error(`Fatal: ${err.message}`);
+      process.exit(1);
+    });
+}
