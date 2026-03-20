@@ -8,19 +8,19 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/samlafell/.nvm/versions/node/v22.12.0/bin/node</string>
-    <string>/Users/samlafell/Documents/programming_projects/broken-bats-csc/scripts/field-bot-local.mjs</string>
+    <string>/Users/sam/.nvm/versions/node/v22.12.0/bin/node</string>
+    <string>/Users/sam/Documents/programming_projects/broken-bats-csc/scripts/field-bot-local.mjs</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/samlafell/Documents/programming_projects/broken-bats-csc</string>
+  <string>/Users/sam/Documents/programming_projects/broken-bats-csc</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>ADMIN_PASSWORD</key>
     <string>admin123</string>
     <key>PATH</key>
-    <string>/Users/samlafell/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/Users/sam/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <!-- Daily at 6:00 AM Eastern (11:00 UTC) -->
@@ -33,9 +33,9 @@
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/samlafell/Library/Logs/field-bot.log</string>
+  <string>/Users/sam/Library/Logs/field-bot.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/samlafell/Library/Logs/field-bot.log</string>
+  <string>/Users/sam/Library/Logs/field-bot.log</string>
 
   <key>RunAtLoad</key>
   <false/>

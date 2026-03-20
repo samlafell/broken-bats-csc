@@ -316,7 +316,7 @@ See `scripts/com.brokenbats.fieldbot.plist` for the plist definition.
 
 ```bash
 # From MBP — sync the repo to the Mini over Tailscale
-ssh samlafell@100.90.16.107
+ssh sam@100.90.16.107
 cd ~/Documents/programming_projects/broken-bats-csc
 git pull
 npm install   # installs puppeteer + chromium
