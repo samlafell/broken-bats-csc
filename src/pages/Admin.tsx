@@ -75,10 +75,14 @@ function parseTimeSlot(slot: string): [string, string] {
 }
 
 function shortTimeLabel(slot: string): string {
-  const part = slot.split('-')[0].trim();
-  const m = part.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
-  if (!m) return part;
-  return `${m[1]}:${m[2]}`;
+  const fmt = (s: string) => {
+    const m = s.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+    if (!m) return s.trim();
+    return `${m[1]}:${m[2]}`;
+  };
+  const parts = slot.split('-');
+  if (parts.length < 2) return fmt(parts[0]);
+  return `${fmt(parts[0])}-${fmt(parts[1])}`;
 }
 
 export default function Admin() {
