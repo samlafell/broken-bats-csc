@@ -74,6 +74,13 @@ function parseTimeSlot(slot: string): [string, string] {
   return [parse12(parts[0]), parse12(parts[1] ?? parts[0])];
 }
 
+function shortTimeLabel(slot: string): string {
+  const part = slot.split('-')[0].trim();
+  const m = part.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+  if (!m) return part;
+  return `${m[1]}:${m[2]}`;
+}
+
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<'roster' | 'fields' | 'schedule'>('roster');
   const [rosterData, setRosterData] = useState<Player[]>([]);
@@ -88,6 +95,8 @@ export default function Admin() {
   const [timeEnd, setTimeEnd] = useState('');
   const [showNewGameForm, setShowNewGameForm] = useState(false);
   const [newGame, setNewGame] = useState({ opponent: '', date: '', time: '', location: '', field_name: '' });
+  const [selectedTime24, setSelectedTime24] = useState('');
+  const [customFieldName, setCustomFieldName] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -116,6 +125,8 @@ export default function Admin() {
         body: JSON.stringify(newGame),
       });
       setNewGame({ opponent: '', date: '', time: '', location: '', field_name: '' });
+      setSelectedTime24('');
+      setCustomFieldName(false);
       setShowNewGameForm(false);
       loadData();
     } catch (err) {
@@ -137,13 +148,18 @@ export default function Admin() {
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const currentFieldData = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return fieldData.filter((f) => f.date >= today);
+  }, [fieldData]);
+
   const uniqueFieldNames = useMemo(
-    () => [...new Set(fieldData.map((f) => f.name))].sort(),
-    [fieldData]
+    () => [...new Set(currentFieldData.map((f) => f.name))].sort(),
+    [currentFieldData]
   );
 
   const filteredFields = useMemo(() => {
-    let data = fieldData;
+    let data = currentFieldData;
     if (fieldFilter !== 'all') data = data.filter((f) => f.name === fieldFilter);
     if (dateFilter) data = data.filter((f) => f.date === dateFilter);
     if (timeStart || timeEnd) {
@@ -155,7 +171,7 @@ export default function Admin() {
       });
     }
     return data;
-  }, [fieldData, fieldFilter, dateFilter, timeStart, timeEnd]);
+  }, [currentFieldData, fieldFilter, dateFilter, timeStart, timeEnd]);
 
   const fieldsByDate = useMemo(() => {
     const grouped = new Map<string, Field[]>();
@@ -175,21 +191,62 @@ export default function Admin() {
     );
   }, [fieldData]);
 
+  const dateTimeFilteredFields = useMemo(() => {
+    let data = currentFieldData;
+    if (dateFilter) data = data.filter((f) => f.date === dateFilter);
+    if (timeStart || timeEnd) {
+      data = data.filter((f) => {
+        const [slotStart, slotEnd] = parseTimeSlot(f.time_slot);
+        if (timeStart && slotEnd <= timeStart) return false;
+        if (timeEnd && slotStart >= timeEnd) return false;
+        return true;
+      });
+    }
+    return data;
+  }, [currentFieldData, dateFilter, timeStart, timeEnd]);
+
   const availabilitySummary = useMemo(() => {
     const summary = new Map<string, { available: number; total: number }>();
-    for (const f of fieldData) {
+    for (const f of dateTimeFilteredFields) {
       const entry = summary.get(f.name) ?? { available: 0, total: 0 };
       entry.total++;
       if (f.status === 'Available') entry.available++;
       summary.set(f.name, entry);
     }
     return summary;
-  }, [fieldData]);
+  }, [dateTimeFilteredFields]);
 
   const fieldLocationMap = useMemo(
     () => new Map(fieldLocations.map((l) => [l.field_name, l.map_url])),
     [fieldLocations]
   );
+
+  const availableGameFields = useMemo(() => {
+    if (!newGame.date || !selectedTime24) return [];
+
+    const [sh, sm] = selectedTime24.split(':').map(Number);
+    const endMin = sh * 60 + sm + 240;
+    const cappedMin = Math.min(endMin, 23 * 60 + 59);
+    const endTime = `${String(Math.floor(cappedMin / 60)).padStart(2, '0')}:${String(cappedMin % 60).padStart(2, '0')}`;
+
+    const daySlots = fieldData.filter(f => f.date === newGame.date);
+    const grouped = new Map<string, Field[]>();
+
+    for (const f of daySlots) {
+      const [slotStart, slotEnd] = parseTimeSlot(f.time_slot);
+      if (slotStart === '00:00' && slotEnd === '00:00') continue;
+      if (slotStart < endTime && slotEnd > selectedTime24) {
+        const arr = grouped.get(f.name) ?? [];
+        arr.push(f);
+        grouped.set(f.name, arr);
+      }
+    }
+
+    return [...grouped.entries()]
+      .filter(([, slots]) => slots.every(s => s.status === 'Available'))
+      .map(([name]) => name)
+      .sort();
+  }, [fieldData, newGame.date, selectedTime24]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
@@ -428,53 +485,98 @@ export default function Admin() {
               </div>
             )}
 
-            {fieldsByDate.map(([date, fields]) => (
-              <div key={date} className="mb-8 last:mb-0">
-                <div className="flex items-center gap-3 mb-4">
-                  <Calendar className="w-4 h-4 text-stone-500" />
-                  <h3 className="text-lg font-bold">
-                    {new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </h3>
-                  <span className="text-xs font-mono text-stone-500">
-                    {fields.filter((f) => f.status === 'Available').length}/{fields.length} slots open
-                  </span>
+            {fieldsByDate.map(([date, fields]) => {
+              const fieldNames = [...new Set(fields.map(f => f.name))].sort();
+              const timeSlots = [...new Set(fields.map(f => f.time_slot))];
+              timeSlots.sort((a, b) => {
+                const [aStart] = parseTimeSlot(a);
+                const [bStart] = parseTimeSlot(b);
+                return aStart.localeCompare(bStart);
+              });
+              const lookup = new Map<string, Map<string, Field>>();
+              for (const f of fields) {
+                if (!lookup.has(f.name)) lookup.set(f.name, new Map());
+                lookup.get(f.name)!.set(f.time_slot, f);
+              }
+
+              return (
+                <div key={date} className="mb-8 last:mb-0">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Calendar className="w-4 h-4 text-stone-500" />
+                    <h3 className="text-lg font-bold">
+                      {new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </h3>
+                    <span className="text-xs font-mono text-stone-500">
+                      {fields.filter((f) => f.status === 'Available').length}/{fields.length} slots open
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-stone-800">
+                    <table className="w-full border-collapse min-w-[500px]">
+                      <thead>
+                        <tr className="bg-stone-950">
+                          <th className="sticky left-0 z-10 bg-stone-950 text-left text-[11px] font-mono uppercase tracking-wider text-stone-500 px-4 py-3 border-b border-stone-800">
+                            Field
+                          </th>
+                          {timeSlots.map(slot => (
+                            <th key={slot} className="text-center text-[11px] font-mono uppercase tracking-wider text-stone-500 px-2 py-3 border-b border-stone-800 whitespace-nowrap">
+                              {shortTimeLabel(slot)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fieldNames.map((name, ri) => (
+                          <tr key={name} className={ri % 2 === 0 ? 'bg-stone-900/40' : ''}>
+                            <td className="sticky left-0 z-10 bg-stone-900 px-4 py-2.5 border-b border-stone-800/50 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm">{name}</span>
+                                {fieldLocationMap.get(name) && (
+                                  <a
+                                    href={fieldLocationMap.get(name)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-stone-500 hover:text-amber-500 transition-colors"
+                                    title="View Map"
+                                  >
+                                    <MapPin className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
+                              </div>
+                            </td>
+                            {timeSlots.map(slot => {
+                              const field = lookup.get(name)?.get(slot);
+                              const available = field?.status === 'Available';
+                              return (
+                                <td
+                                  key={slot}
+                                  className="border-b border-stone-800/50 p-1"
+                                  title={`${name} — ${slot}: ${field?.status ?? 'No data'}`}
+                                >
+                                  <div className={`h-8 rounded-md ${
+                                    !field ? 'bg-stone-800/50' : available ? 'bg-emerald-500' : 'bg-red-500'
+                                  }`} />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center gap-4 mt-3 text-[11px] text-stone-500 font-mono">
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-emerald-500" /> Available</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded bg-red-500" /> Booked</span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {fields.map((field) => (
-                    <div key={field.id} className="bg-stone-950 border border-stone-800 rounded-xl p-5">
-                      <div className="flex items-start justify-between mb-4">
-                        <h3 className="font-bold text-lg">{field.name}</h3>
-                        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${
-                          field.status === 'Available'
-                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-                            : 'bg-stone-800 text-stone-500'
-                        }`}>
-                          {field.status}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-stone-400">
-                        <Clock className="w-4 h-4" /> {field.time_slot}
-                      </div>
-                      {fieldLocationMap.get(field.name) && (
-                        <a
-                          href={fieldLocationMap.get(field.name)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-stone-400 hover:text-amber-500 mt-2 transition-colors"
-                        >
-                          <MapPin className="w-3.5 h-3.5" /> View Map
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -504,31 +606,77 @@ export default function Admin() {
                 <input
                   type="date"
                   value={newGame.date}
-                  onChange={(e) => setNewGame({ ...newGame, date: e.target.value })}
+                  onChange={(e) => {
+                    setNewGame({ ...newGame, date: e.target.value, field_name: '', location: '' });
+                    setCustomFieldName(false);
+                  }}
                   required
                   className="bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
                 />
-                <input
-                  type="text"
-                  placeholder="Time (e.g. 10:00 AM)"
-                  value={newGame.time}
-                  onChange={(e) => setNewGame({ ...newGame, time: e.target.value })}
-                  required
-                  className="bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
-                />
+                <div className="relative">
+                  <select
+                    value={selectedTime24}
+                    onChange={(e) => {
+                      const opt = TIME_OPTIONS.find(o => o.value === e.target.value);
+                      setSelectedTime24(e.target.value);
+                      setNewGame({ ...newGame, time: opt?.label ?? '', field_name: '', location: '' });
+                      setCustomFieldName(false);
+                    }}
+                    required
+                    className="w-full appearance-none bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
+                  >
+                    <option value="" disabled>Select time...</option>
+                    {TIME_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+                </div>
+                <div className="relative">
+                  <select
+                    value={customFieldName ? '__other__' : newGame.field_name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__other__') {
+                        setCustomFieldName(true);
+                        setNewGame({ ...newGame, field_name: '', location: '' });
+                      } else {
+                        setCustomFieldName(false);
+                        setNewGame({ ...newGame, field_name: val, location: val });
+                      }
+                    }}
+                    disabled={!newGame.date || !selectedTime24}
+                    className="w-full appearance-none bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="" disabled>
+                      {!newGame.date || !selectedTime24
+                        ? 'Pick date & time first'
+                        : availableGameFields.length === 0
+                          ? 'No fields available — use Other'
+                          : 'Select a field...'}
+                    </option>
+                    {availableGameFields.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="__other__">Other...</option>
+                  </select>
+                  <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-stone-500 pointer-events-none" />
+                </div>
+                {customFieldName && (
+                  <input
+                    type="text"
+                    placeholder="Enter field name"
+                    value={newGame.field_name}
+                    onChange={(e) => setNewGame({ ...newGame, field_name: e.target.value })}
+                    className="bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
+                  />
+                )}
                 <input
                   type="text"
                   placeholder="Location"
                   value={newGame.location}
                   onChange={(e) => setNewGame({ ...newGame, location: e.target.value })}
                   required
-                  className="bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
-                />
-                <input
-                  type="text"
-                  placeholder="Field Name (optional)"
-                  value={newGame.field_name}
-                  onChange={(e) => setNewGame({ ...newGame, field_name: e.target.value })}
                   className="bg-stone-900 border border-stone-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-stone-600"
                 />
                 <button
