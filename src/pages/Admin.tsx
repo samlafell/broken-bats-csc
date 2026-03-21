@@ -74,15 +74,62 @@ function parseTimeSlot(slot: string): [string, string] {
   return [parse12(parts[0]), parse12(parts[1] ?? parts[0])];
 }
 
-function shortTimeLabel(slot: string): string {
-  const fmt = (s: string) => {
-    const m = s.trim().match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
-    if (!m) return s.trim();
-    return `${m[1]}:${m[2]}`;
-  };
-  const parts = slot.split('-');
-  if (parts.length < 2) return fmt(parts[0]);
-  return `${fmt(parts[0])}-${fmt(parts[1])}`;
+function addHalfHour(time24: string): string {
+  const [h, m] = time24.split(':').map(Number);
+  const totalMin = h * 60 + m + 30;
+  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+}
+
+function formatTime24(t: string): string {
+  const [hStr, m] = t.split(':');
+  let h = parseInt(hStr, 10);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${m} ${suffix}`;
+}
+
+function normalizeToHalfHours(fields: Field[]): {
+  columns: string[];
+  fieldNames: string[];
+  grid: Map<string, Map<string, 'Available' | 'Booked'>>;
+  availableCount: number;
+  totalCount: number;
+} {
+  const grid = new Map<string, Map<string, 'Available' | 'Booked'>>();
+  const allTimes = new Set<string>();
+
+  for (const f of fields) {
+    if (f.time_slot.includes('Unavailable')) continue;
+
+    const [start, end] = parseTimeSlot(f.time_slot);
+    if (start === '00:00' && end === '00:00') continue;
+    const status: 'Available' | 'Booked' = f.status === 'Available' ? 'Available' : 'Booked';
+
+    if (!grid.has(f.name)) grid.set(f.name, new Map());
+    const row = grid.get(f.name)!;
+
+    let cursor = start;
+    while (cursor < end) {
+      allTimes.add(cursor);
+      if (!row.has(cursor)) row.set(cursor, status);
+      cursor = addHalfHour(cursor);
+    }
+  }
+
+  const columns = [...allTimes].sort();
+  const fieldNames = [...grid.keys()].sort();
+
+  let availableCount = 0;
+  let totalCount = 0;
+  for (const row of grid.values()) {
+    for (const status of row.values()) {
+      totalCount++;
+      if (status === 'Available') availableCount++;
+    }
+  }
+
+  return { columns, fieldNames, grid, availableCount, totalCount };
 }
 
 export default function Admin() {
@@ -490,18 +537,7 @@ export default function Admin() {
             )}
 
             {fieldsByDate.map(([date, fields]) => {
-              const fieldNames = [...new Set(fields.map(f => f.name))].sort();
-              const timeSlots = [...new Set(fields.map(f => f.time_slot))];
-              timeSlots.sort((a, b) => {
-                const [aStart] = parseTimeSlot(a);
-                const [bStart] = parseTimeSlot(b);
-                return aStart.localeCompare(bStart);
-              });
-              const lookup = new Map<string, Map<string, Field>>();
-              for (const f of fields) {
-                if (!lookup.has(f.name)) lookup.set(f.name, new Map());
-                lookup.get(f.name)!.set(f.time_slot, f);
-              }
+              const { columns, fieldNames, grid, availableCount, totalCount } = normalizeToHalfHours(fields);
 
               return (
                 <div key={date} className="mb-8 last:mb-0">
@@ -516,7 +552,7 @@ export default function Admin() {
                       })}
                     </h3>
                     <span className="text-xs font-mono text-stone-500">
-                      {fields.filter((f) => f.status === 'Available').length}/{fields.length} slots open
+                      {availableCount}/{totalCount} slots open
                     </span>
                   </div>
 
@@ -527,9 +563,9 @@ export default function Admin() {
                           <th className="sticky left-0 z-10 bg-stone-950 text-left text-[11px] font-mono uppercase tracking-wider text-stone-500 px-4 py-3 border-b border-stone-800">
                             Field
                           </th>
-                          {timeSlots.map(slot => (
-                            <th key={slot} className="text-center text-[11px] font-mono uppercase tracking-wider text-stone-500 px-2 py-3 border-b border-stone-800 whitespace-nowrap">
-                              {shortTimeLabel(slot)}
+                          {columns.map(col => (
+                            <th key={col} className="text-center text-[11px] font-mono tracking-wider text-stone-500 px-2 py-3 border-b border-stone-800 whitespace-nowrap">
+                              {formatTime24(col)}
                             </th>
                           ))}
                         </tr>
@@ -553,17 +589,16 @@ export default function Admin() {
                                 )}
                               </div>
                             </td>
-                            {timeSlots.map(slot => {
-                              const field = lookup.get(name)?.get(slot);
-                              const available = field?.status === 'Available';
+                            {columns.map(col => {
+                              const status = grid.get(name)?.get(col);
                               return (
                                 <td
-                                  key={slot}
+                                  key={col}
                                   className="border-b border-stone-800/50 p-1"
-                                  title={`${name} — ${slot}: ${field?.status ?? 'No data'}`}
+                                  title={`${name} — ${formatTime24(col)}: ${status ?? 'No data'}`}
                                 >
                                   <div className={`h-8 rounded-md ${
-                                    !field ? 'bg-stone-800/50' : available ? 'bg-emerald-500' : 'bg-red-500'
+                                    !status ? 'bg-stone-800/50' : status === 'Available' ? 'bg-emerald-500' : 'bg-red-500'
                                   }`} />
                                 </td>
                               );
