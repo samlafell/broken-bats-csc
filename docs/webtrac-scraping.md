@@ -95,19 +95,18 @@ Other params (`keyword`, `frclass`, `type`, `subtype`, `frheadcount`,
 
 ## Target Date Logic
 
-We scrape **exactly 14 days from today** (Eastern time, `America/New_York`).
+We scrape **exactly 15 days from today** (Eastern time, `America/New_York`).
 
-Why: Raleigh Parks blocks field availability once a date is within 14 calendar
-days. Day 14 is the **last visible day** before it becomes "unbookable".
-Example: if today is March 14, the target date is March 28.
-
-JavaScript's `Date.setDate()` handles month/year rollovers automatically
-(e.g. March 20 + 14 = April 3).
+Why: Raleigh Parks locks field availability once a date is within ~14 calendar
+days. Empirically, day +14 already shows everything as "Unavailable", while day
++15 is the **last bookable day**. Verified March 2026: +14 = 100% booked,
++15 = normal availability. Example: if today is March 20, the target date is
+April 4.
 
 ```js
 const now = new Date();
 const eastern = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-eastern.setDate(eastern.getDate() + 14);
+eastern.setDate(eastern.getDate() + 15);
 // Format as MM/DD/YYYY for the form, YYYY-MM-DD for our DB
 ```
 

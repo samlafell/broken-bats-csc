@@ -51,7 +51,7 @@ function getTargetDate() {
   const eastern = new Date(
     now.toLocaleString('en-US', { timeZone: 'America/New_York' })
   );
-  eastern.setDate(eastern.getDate() + 14);
+  eastern.setDate(eastern.getDate() + 15);
 
   const year = eastern.getFullYear();
   const month = String(eastern.getMonth() + 1).padStart(2, '0');
