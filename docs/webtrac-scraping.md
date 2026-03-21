@@ -197,19 +197,19 @@ Results are **10 per page**, sorted alphabetically by facility name.
 |---|---|---|
 | 1 | Baileywick 1 Ballfield MAX Base 70 ft | Baileywick 1 |
 | 2 | Baileywick 2 Ballfield MAX Base 60 ft | Baileywick 2 |
-| 3 | Biltmore 2 Ballfield MAX Base 80 ft | _(not tracked)_ |
+| 3 | Biltmore 2 Ballfield MAX Base 80 ft | Biltmore Hills 2 |
 | 4 | Biltmore 1 Ballfield MAX Base 60 ft | _(not tracked)_ |
 | 5 | Brentwood Ballfield MAX Base 50 ft | _(not tracked)_ |
-| 6 | Carolina Pines 1 Ballfield MAX Base 70 ft | _(not tracked)_ |
-| 7 | Carolina Pines 2 Ballfield MAX Base 70 ft | _(not tracked)_ |
+| 6 | Carolina Pines 1 Ballfield MAX Base 70 ft | Carolina Pines 1 |
+| 7 | Carolina Pines 2 Ballfield MAX Base 70 ft | Carolina Pines 2 |
 | 8 | Carolina Pines 3 Ballfield MAX Base 70 ft | _(not tracked)_ |
 | 9 | Cedar Hills Ballfield MAX Base 90 ft | Cedar Hills |
 | 10 | Honeycutt Ballfield MAX Base 90 ft | Honeycutt |
 
-### Page 2+ (expected, not yet confirmed)
+### Page 2+ (not yet confirmed — discovery mode will map these)
 
-Green Road 1&2, Jaycee fields, Kentwood, Kiwanis, Lake Lynn, Laurel Hills 1&2,
-Lions 1-4, Marsh Creek, etc.
+Jaycee 1&2, Lake Lynn, Laurel Hills 1&2, Lions 1-4, Marsh Creek,
+Millbrook 1&2, Oakwood 1, Optimist 2, Pullen 1&2, Sanderford 1, Worthdale 1.
 
 ### How Pagination Works
 
@@ -265,22 +265,96 @@ The WebTrac site uses **Cloudflare Bot Fight Mode**. Key findings:
 
 ## Tracked Fields
 
-These are the fields our team can use (from `fields.md`). The "Tracked Name"
-column is what we use for `includes()` matching against the verbose site names.
+Bobby's 25-field list (updated March 2026). The "Confirmed WebTrac Name" column
+shows the actual facility name on the WebTrac site where we've verified the
+mapping. Fields without a confirmed name rely on discovery mode (see below).
 
-| Tracked Name | Type (from fields.md) |
-|---|---|
-| Baileywick 1 | Baseball |
-| Baileywick 2 | Baseball |
-| Cedar Hills | Baseball/Softball |
-| Green Road 1 | Baseball |
-| Green Road 2 | Baseball |
-| Honeycutt | Baseball/Softball |
-| Kiwanis | Baseball |
-| Lions 4 | Baseball |
-| Marsh Creek | Baseball |
-| Oakwood 2 | Baseball |
-| Optimist 2 | Baseball |
+| Tracked Name | Type (from fields.md) | Confirmed WebTrac Name |
+|---|---|---|
+| Baileywick 1 | Baseball | Baileywick 1 Ballfield MAX Base 70 ft |
+| Baileywick 2 | Baseball | Baileywick 2 Ballfield MAX Base 60 ft |
+| Biltmore Hills 2 | Softball | Biltmore 2 Ballfield MAX Base 80 ft |
+| Carolina Pines 1 | Softball | Carolina Pines 1 Ballfield MAX Base 70 ft |
+| Carolina Pines 2 | Softball | Carolina Pines 2 Ballfield MAX Base 70 ft |
+| Cedar Hills | Baseball/Softball | Cedar Hills Ballfield MAX Base 90 ft |
+| Honeycutt | Baseball/Softball | Honeycutt Ballfield MAX Base 90 ft |
+| Jaycee 1 | Softball | _(run discovery)_ |
+| Jaycee 2 | Youth Softball | _(run discovery)_ |
+| Lake Lynn | Youth Baseball | _(run discovery)_ |
+| Laurel Hills 1 | Youth Baseball | _(run discovery)_ |
+| Laurel Hills 2 | Youth Baseball | _(run discovery)_ |
+| Lions 1 | Softball | _(run discovery)_ |
+| Lions 2 | Softball | _(run discovery)_ |
+| Lions 3 | Youth Baseball | _(run discovery)_ |
+| Lions 4 | Baseball | _(run discovery)_ |
+| Marsh Creek | Baseball | _(run discovery)_ |
+| Millbrook 1 | Softball | _(run discovery)_ |
+| Millbrook 2 | Softball | _(run discovery)_ |
+| Oakwood 1 | Softball | _(run discovery)_ |
+| Optimist 2 | Baseball | _(run discovery)_ |
+| Pullen 1 | Softball | _(run discovery)_ |
+| Pullen 2 | Youth Baseball | _(run discovery)_ |
+| Sanderford 1 | Youth Baseball/Softball | _(run discovery)_ |
+| Worthdale 1 | Softball | _(run discovery)_ |
+
+---
+
+## Field Name Discovery & Aliases
+
+Bobby's short names (e.g. "Biltmore Hills 2") don't always match the verbose
+WebTrac facility names (e.g. "Biltmore 2 Ballfield MAX Base 80 ft"). To handle
+this, the scraper uses a `dim_field_aliases` table that maps WebTrac names to
+our tracked names.
+
+### How It Works
+
+1. On startup, the scraper fetches all known aliases from `GET /api/fields/aliases`
+2. For each facility on the page, matching uses a three-step cascade:
+   - **Alias lookup** — exact match against `dim_field_aliases.webtrac_name`
+   - **Substring match** — `facilityName.includes(trackedName)` (original logic)
+   - **Fuzzy match** (discovery mode only) — tokenize both names, strip common
+     suffixes like "Ballfield MAX Base XX ft", score by token overlap
+3. When a new match is found via substring or fuzzy, it's saved as an alias
+
+### Running Discovery Mode
+
+```bash
+# Local cron bot
+DISCOVER=true ADMIN_PASSWORD=... node scripts/field-bot-local.mjs
+
+# Or with --discover flag
+ADMIN_PASSWORD=... node scripts/field-bot-local.mjs --discover
+
+# Ad-hoc for a specific date
+ADMIN_PASSWORD=... node scripts/field-bot-adhoc.mjs 2026-04-15 --discover
+```
+
+The first few runs with discovery mode enabled will populate `dim_field_aliases`
+with confirmed mappings. After that, normal runs use the stored aliases for fast
+exact matching. Check the scraper logs for:
+
+- `Discovered N new alias(es)` — new mappings were found and saved
+- `N facility name(s) could not be matched` — candidates for manual review
+- `Tracked fields with NO slots found` — fields that may need alias correction
+
+### API Endpoints for Aliases
+
+- `GET /api/fields/aliases` — all rows from `dim_field_aliases` (public)
+- `POST /api/fields/aliases` — upsert aliases (admin-only), body:
+  ```json
+  { "aliases": [{ "trackedName": "Biltmore Hills 2", "webtracName": "Biltmore 2 Ballfield MAX Base 80 ft", "confirmed": 1 }] }
+  ```
+
+### Database Table
+
+```sql
+CREATE TABLE dim_field_aliases (
+  tracked_name TEXT NOT NULL,
+  webtrac_name TEXT NOT NULL,
+  confirmed INTEGER NOT NULL DEFAULT 0,  -- 0 = auto-discovered, 1 = manually verified
+  PRIMARY KEY (tracked_name, webtrac_name)
+);
+```
 
 ---
 

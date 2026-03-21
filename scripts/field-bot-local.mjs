@@ -11,25 +11,26 @@
  *   ADMIN_PASSWORD  (required) — Admin password for the Broken Bats API
  *   SITE_URL        (optional) — Defaults to https://cscbrokenbats.org
  *   HEADLESS        (optional) — Set to "false" to watch the browser
+ *   DISCOVER        (optional) — Set to "true" to enable fuzzy discovery mode
  */
 
 import puppeteer from 'puppeteer';
+import {
+  TRACKED_FIELDS,
+  fetchAliases,
+  saveAliases,
+  parseResultsInBrowser,
+} from './field-config.mjs';
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-const TRACKED_FIELDS = [
-  'Baileywick 1', 'Baileywick 2', 'Cedar Hills',
-  'Green Road 1', 'Green Road 2', 'Honeycutt',
-  'Kiwanis', 'Lions 4', 'Marsh Creek',
-  'Oakwood 2', 'Optimist 2',
-];
-
 const WEBTRAC_BASE = 'https://ncraleighweb.myvscloud.com/webtrac/web';
 const SITE_URL = process.env.SITE_URL || 'https://cscbrokenbats.org';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const HEADLESS = process.env.HEADLESS !== 'false';
+const DISCOVER = process.env.DISCOVER === 'true' || process.argv.includes('--discover');
 const MAX_PAGES = 5;
 
 // ---------------------------------------------------------------------------
@@ -63,65 +64,6 @@ function getTargetDate() {
 }
 
 // ---------------------------------------------------------------------------
-// Parse one page of results (runs inside page.evaluate)
-// ---------------------------------------------------------------------------
-
-function parseResultsInBrowser(trackedFields) {
-  const results = [];
-  const allNames = [];
-  const locations = [];
-
-  const blocks = document.querySelectorAll('div.result-content');
-  for (const block of blocks) {
-    const nameEl = block.querySelector('h2 span');
-    if (!nameEl) continue;
-
-    const facilityName = nameEl.textContent.trim();
-    allNames.push(facilityName);
-
-    const matched = trackedFields.find((f) =>
-      facilityName.toLowerCase().includes(f.toLowerCase())
-    );
-    if (!matched) continue;
-
-    const mapLink = block.querySelector('.search-more a[href*="maps.google.com"]');
-    if (mapLink) {
-      locations.push({ fieldName: matched, mapUrl: mapLink.href });
-    }
-
-    // Available / booked <a> tags
-    const slotLinks = block.querySelectorAll('a.cart-button--state-block');
-    for (const link of slotLinks) {
-      const timeText = link.textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(timeText)) continue;
-
-      results.push({
-        fieldName: matched,
-        timeSlot: timeText.replace(/\s+/g, ' '),
-        status: link.classList.contains('success') ? 'Available' : 'Booked',
-      });
-    }
-
-    // Unavailable <span> pairs (fallback pattern)
-    const spans = block.querySelectorAll('span');
-    for (let i = 0; i < spans.length; i++) {
-      const spanText = spans[i].textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(spanText)) continue;
-      const nextText = spans[i + 1]?.textContent?.trim() ?? '';
-      if (nextText.toLowerCase() === 'unavailable') {
-        results.push({
-          fieldName: matched,
-          timeSlot: spanText.replace(/\s+/g, ' '),
-          status: 'Booked',
-        });
-      }
-    }
-  }
-
-  return { results, allNames, locations };
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -135,6 +77,12 @@ async function main() {
   const { isoDate, usDate } = getTargetDate();
   info(`Target date: ${isoDate} (${usDate})`);
   info(`Headless: ${HEADLESS}`);
+  info(`Discovery mode: ${DISCOVER}`);
+
+  // Load existing aliases so the browser-side matcher can use them
+  const aliasMap = await fetchAliases(SITE_URL);
+  info(`Loaded ${aliasMap.size} existing aliases`);
+  const aliasObj = Object.fromEntries(aliasMap);
 
   const browser = await puppeteer.launch({
     headless: HEADLESS ? 'new' : false,
@@ -143,6 +91,8 @@ async function main() {
 
   let allResults = [];
   const locationMap = new Map();
+  const allNewAliases = [];
+  const allUnmatched = [];
 
   try {
     const page = await browser.newPage();
@@ -210,16 +160,20 @@ async function main() {
     for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
       await page.waitForSelector('div.result-content', { timeout: 15_000 }).catch(() => null);
 
-      const { results, allNames, locations } = await page.evaluate(
-        parseResultsInBrowser,
-        TRACKED_FIELDS
-      );
+      const { results, allNames, locations, newAliases, unmatchedFacilities } =
+        await page.evaluate(parseResultsInBrowser, {
+          trackedFields: TRACKED_FIELDS,
+          aliasMap: aliasObj,
+          discover: DISCOVER,
+        });
 
       for (const loc of locations) {
         if (!locationMap.has(loc.fieldName)) {
           locationMap.set(loc.fieldName, loc.mapUrl);
         }
       }
+      allNewAliases.push(...newAliases);
+      allUnmatched.push(...unmatchedFacilities);
 
       info(`Page ${pageNum}: ${allNames.length} facilities, ${results.length} matched slots`);
       if (allNames.length > 0) {
@@ -233,9 +187,6 @@ async function main() {
       );
       allResults.push(...matched);
 
-      // Try to click the next page button
-      // Pagination: <ul class="paging"> with <button class="paging__button" data-click-set-value="N">
-      // Current page button has additional class "primary"
       const nextPage = pageNum + 1;
       const pagingInfo = await page.evaluate((targetPage) => {
         const pagingUl = document.querySelector('ul.paging');
@@ -276,6 +227,26 @@ async function main() {
       info(`Fields found: ${fields.join(', ')}`);
     } else {
       warn('Zero slots found — check docs/webtrac-scraping.md for debugging');
+    }
+
+    // Discovery summary
+    if (allNewAliases.length > 0) {
+      info(`Discovered ${allNewAliases.length} new alias(es):`);
+      for (const a of allNewAliases) {
+        info(`  "${a.trackedName}" ← "${a.webtracName}"`);
+      }
+    }
+    if (allUnmatched.length > 0) {
+      warn(`${allUnmatched.length} facility name(s) could not be matched:`);
+      for (const u of allUnmatched) {
+        warn(`  "${u.facilityName}" (best candidate: "${u.bestCandidate}", score: ${u.score.toFixed(2)})`);
+      }
+    }
+
+    const matchedFields = new Set(allResults.map((r) => r.fieldName));
+    const missing = TRACKED_FIELDS.filter((f) => !matchedFields.has(f));
+    if (missing.length > 0) {
+      warn(`Tracked fields with NO slots found: ${missing.join(', ')}`);
     }
   } finally {
     await browser.close();
@@ -322,6 +293,13 @@ async function main() {
 
   const importData = await importRes.json();
   info(`Import complete: ${JSON.stringify(importData)}`);
+
+  // Persist newly discovered aliases
+  if (allNewAliases.length > 0) {
+    info(`Saving ${allNewAliases.length} new alias(es) to API...`);
+    await saveAliases(SITE_URL, token, allNewAliases);
+    info('Aliases saved');
+  }
 }
 
 main().catch((err) => {

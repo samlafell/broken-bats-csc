@@ -16,7 +16,6 @@ Jaycee 	Softball 	Y 	260 ft 	43/60
 Jaycee #2 	Youth Softball 	Y 	248 ft 	43/60
 Jaycee Little 	Youth Baseball 	Y 	191 ft 	48/70
 Kentwood 	Youth Baseball 	Y 	188 ft 	43/60
-Kiwanis 	Baseball 	Y 	185 ft 	43/50
 Lake Lynn 	Youth Baseball 	Y 	300 ft 	-/50
 Laurel Hills #1 	Youth Baseball 	Y 	300 ft 	43/60
 Laurel Hills #2 	Youth Baseball 	Y 	300 ft 	54/80

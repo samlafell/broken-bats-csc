@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS scrape_runs;
+DROP TABLE IF EXISTS dim_field_aliases;
 DROP TABLE IF EXISTS dim_field_locations;
 DROP TABLE IF EXISTS rsvps;
 DROP TABLE IF EXISTS dues;
@@ -81,6 +82,14 @@ CREATE TABLE dim_field_locations (
   field_name TEXT PRIMARY KEY,
   map_url TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE dim_field_aliases (
+  tracked_name TEXT NOT NULL,
+  webtrac_name TEXT NOT NULL,
+  confirmed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (tracked_name, webtrac_name)
 );
 
 CREATE TABLE scrape_runs (

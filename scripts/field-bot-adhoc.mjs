@@ -11,76 +11,19 @@
  *   ADMIN_PASSWORD  (required) — Admin password for the Broken Bats API
  *   SITE_URL        (optional) — Defaults to https://cscbrokenbats.org
  *   HEADLESS        (optional) — Set to "false" to watch the browser
+ *   DISCOVER        (optional) — Set to "true" to enable fuzzy discovery mode
  */
 
 import puppeteer from 'puppeteer';
-
-const TRACKED_FIELDS = [
-  'Baileywick 1', 'Baileywick 2', 'Cedar Hills',
-  'Green Road 1', 'Green Road 2', 'Honeycutt',
-  'Kiwanis', 'Lions 4', 'Marsh Creek',
-  'Oakwood 2', 'Optimist 2',
-];
+import {
+  TRACKED_FIELDS,
+  fetchAliases,
+  saveAliases,
+  parseResultsInBrowser,
+} from './field-config.mjs';
 
 const WEBTRAC_BASE = 'https://ncraleighweb.myvscloud.com/webtrac/web';
 const MAX_PAGES = 5;
-
-// ---------------------------------------------------------------------------
-// Parse one page of results (runs inside page.evaluate)
-// ---------------------------------------------------------------------------
-
-function parseResultsInBrowser(trackedFields) {
-  const results = [];
-  const allNames = [];
-  const locations = [];
-
-  const blocks = document.querySelectorAll('div.result-content');
-  for (const block of blocks) {
-    const nameEl = block.querySelector('h2 span');
-    if (!nameEl) continue;
-
-    const facilityName = nameEl.textContent.trim();
-    allNames.push(facilityName);
-
-    const matched = trackedFields.find((f) =>
-      facilityName.toLowerCase().includes(f.toLowerCase())
-    );
-    if (!matched) continue;
-
-    const mapLink = block.querySelector('.search-more a[href*="maps.google.com"]');
-    if (mapLink) {
-      locations.push({ fieldName: matched, mapUrl: mapLink.href });
-    }
-
-    const slotLinks = block.querySelectorAll('a.cart-button--state-block');
-    for (const link of slotLinks) {
-      const timeText = link.textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(timeText)) continue;
-
-      results.push({
-        fieldName: matched,
-        timeSlot: timeText.replace(/\s+/g, ' '),
-        status: link.classList.contains('success') ? 'Available' : 'Booked',
-      });
-    }
-
-    const spans = block.querySelectorAll('span');
-    for (let i = 0; i < spans.length; i++) {
-      const spanText = spans[i].textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(spanText)) continue;
-      const nextText = spans[i + 1]?.textContent?.trim() ?? '';
-      if (nextText.toLowerCase() === 'unavailable') {
-        results.push({
-          fieldName: matched,
-          timeSlot: spanText.replace(/\s+/g, ' '),
-          status: 'Booked',
-        });
-      }
-    }
-  }
-
-  return { results, allNames, locations };
-}
 
 // ---------------------------------------------------------------------------
 // ISO → US date format
@@ -104,13 +47,15 @@ function isoToUs(isoDate) {
  * @param {string} [opts.adminPassword]  Admin password (default: env ADMIN_PASSWORD)
  * @param {boolean} [opts.headless]      Run headless (default: env HEADLESS)
  * @param {boolean} [opts.pushToApi]     Push results to the API (default: true)
- * @returns {Promise<{ results: Array, locations: Array, log: string[] }>}
+ * @param {boolean} [opts.discover]      Enable fuzzy discovery mode (default: env DISCOVER)
+ * @returns {Promise<{ results: Array, locations: Array, log: string[], durationMs: number }>}
  */
 export async function scrapeForDate(isoDate, opts = {}) {
   const siteUrl = opts.siteUrl || process.env.SITE_URL || 'https://cscbrokenbats.org';
   const adminPassword = opts.adminPassword || process.env.ADMIN_PASSWORD;
   const headless = opts.headless ?? (process.env.HEADLESS !== 'false');
   const pushToApi = opts.pushToApi ?? true;
+  const discover = opts.discover ?? (process.env.DISCOVER === 'true');
 
   if (pushToApi && !adminPassword) {
     throw new Error('ADMIN_PASSWORD is required when pushToApi is true');
@@ -128,6 +73,12 @@ export async function scrapeForDate(isoDate, opts = {}) {
 
   const startTime = Date.now();
   _info(`Target date: ${isoDate} (${usDate})`);
+  _info(`Discovery mode: ${discover}`);
+
+  // Load existing aliases
+  const aliasMap = await fetchAliases(siteUrl);
+  _info(`Loaded ${aliasMap.size} existing aliases`);
+  const aliasObj = Object.fromEntries(aliasMap);
 
   const browser = await puppeteer.launch({
     headless: headless ? 'new' : false,
@@ -136,6 +87,8 @@ export async function scrapeForDate(isoDate, opts = {}) {
 
   let allResults = [];
   const locationMap = new Map();
+  const allNewAliases = [];
+  const allUnmatched = [];
 
   try {
     const page = await browser.newPage();
@@ -198,16 +151,20 @@ export async function scrapeForDate(isoDate, opts = {}) {
     for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
       await page.waitForSelector('div.result-content', { timeout: 15_000 }).catch(() => null);
 
-      const { results, allNames, locations } = await page.evaluate(
-        parseResultsInBrowser,
-        TRACKED_FIELDS
-      );
+      const { results, allNames, locations, newAliases, unmatchedFacilities } =
+        await page.evaluate(parseResultsInBrowser, {
+          trackedFields: TRACKED_FIELDS,
+          aliasMap: aliasObj,
+          discover,
+        });
 
       for (const loc of locations) {
         if (!locationMap.has(loc.fieldName)) {
           locationMap.set(loc.fieldName, loc.mapUrl);
         }
       }
+      allNewAliases.push(...newAliases);
+      allUnmatched.push(...unmatchedFacilities);
 
       _info(`Page ${pageNum}: ${allNames.length} facilities, ${results.length} matched slots`);
 
@@ -248,6 +205,20 @@ export async function scrapeForDate(isoDate, opts = {}) {
     const avail = allResults.filter((r) => r.status === 'Available').length;
     const booked = allResults.filter((r) => r.status === 'Booked').length;
     _info(`Total: ${allResults.length} slots (${avail} available, ${booked} booked)`);
+
+    // Discovery summary
+    if (allNewAliases.length > 0) {
+      _info(`Discovered ${allNewAliases.length} new alias(es):`);
+      for (const a of allNewAliases) {
+        _info(`  "${a.trackedName}" ← "${a.webtracName}"`);
+      }
+    }
+    if (allUnmatched.length > 0) {
+      _warn(`${allUnmatched.length} facility name(s) could not be matched:`);
+      for (const u of allUnmatched) {
+        _warn(`  "${u.facilityName}" (best: "${u.bestCandidate}", score: ${u.score.toFixed(2)})`);
+      }
+    }
   } finally {
     await browser.close();
     _info('Browser closed');
@@ -297,18 +268,26 @@ export async function scrapeForDate(isoDate, opts = {}) {
 
     const importData = await importRes.json();
     _info(`Import complete: ${JSON.stringify(importData)}`);
+
+    // Persist newly discovered aliases
+    if (allNewAliases.length > 0) {
+      _info(`Saving ${allNewAliases.length} new alias(es) to API...`);
+      await saveAliases(siteUrl, token, allNewAliases);
+      _info('Aliases saved');
+    }
   }
 
   return { results: allResults, locations: locationsArr, log, durationMs };
 }
 
 // ---------------------------------------------------------------------------
-// CLI entry point: node scripts/field-bot-adhoc.mjs 2026-04-15
+// CLI entry point: node scripts/field-bot-adhoc.mjs 2026-04-15 [--discover]
 // ---------------------------------------------------------------------------
 
 const isMain = !process.argv[1] || process.argv[1].endsWith('field-bot-adhoc.mjs');
-if (isMain && process.argv[2]) {
-  scrapeForDate(process.argv[2])
+if (isMain && process.argv[2] && !process.argv[2].startsWith('-')) {
+  const discover = process.argv.includes('--discover');
+  scrapeForDate(process.argv[2], { discover })
     .then(({ results }) => {
       console.log(`\nDone — ${results.length} slots scraped.`);
     })

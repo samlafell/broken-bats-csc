@@ -88,6 +88,35 @@ fields.get('/locations', async (c) => {
   return c.json(results);
 });
 
+fields.get('/aliases', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    'SELECT tracked_name, webtrac_name, confirmed FROM dim_field_aliases ORDER BY tracked_name'
+  ).all();
+  return c.json(results);
+});
+
+fields.post('/aliases', requireAuth('admin'), async (c) => {
+  const body = await c.req.json<{
+    aliases: { trackedName: string; webtracName: string; confirmed?: number }[];
+  }>();
+
+  if (!Array.isArray(body.aliases) || body.aliases.length === 0) {
+    return c.json({ error: 'aliases[] is required' }, 400);
+  }
+
+  const stmt = c.env.DB.prepare(
+    `INSERT INTO dim_field_aliases (tracked_name, webtrac_name, confirmed)
+     VALUES (?, ?, ?)
+     ON CONFLICT (tracked_name, webtrac_name) DO UPDATE SET confirmed = excluded.confirmed`
+  );
+  const batch = body.aliases.map((a) =>
+    stmt.bind(a.trackedName, a.webtracName, a.confirmed ?? 0)
+  );
+  await c.env.DB.batch(batch);
+
+  return c.json({ upserted: body.aliases.length });
+});
+
 fields.get('/scrape-runs', requireAuth('admin'), async (c) => {
   const limit = Number(c.req.query('limit') ?? 20);
   const { results } = await c.env.DB.prepare(
