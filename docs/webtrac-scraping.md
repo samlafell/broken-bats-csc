@@ -95,20 +95,35 @@ Other params (`keyword`, `frclass`, `type`, `subtype`, `frheadcount`,
 
 ## Target Date Logic
 
-We scrape **exactly 15 days from today** (Eastern time, `America/New_York`).
+The **daily cron** (`field-bot-local.mjs`) scrapes a rolling window of **+15
+to +40 days** from today (Eastern time). The **ad-hoc** script can scrape any
+date or date range at least 15 days out.
 
-Why: Raleigh Parks locks field availability once a date is within ~14 calendar
-days. Empirically, day +14 already shows everything as "Unavailable", while day
-+15 is the **last bookable day**. Verified March 2026: +14 = 100% booked,
-+15 = normal availability. Example: if today is March 20, the target date is
-April 4.
+Why +15 minimum: Raleigh Parks locks field availability once a date is within
+~14 calendar days. Empirically, day +14 already shows 100% "Unavailable", while
+day +15 is the first bookable day. Verified March 2026.
 
-```js
-const now = new Date();
-const eastern = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-eastern.setDate(eastern.getDate() + 15);
-// Format as MM/DD/YYYY for the form, YYYY-MM-DD for our DB
+### Daily Cron (field-bot-local.mjs)
+
+Scrapes 26 dates per run (+15 through +40). Each date is a separate WebTrac
+search, results are pushed to the API individually, and the browser session is
+reused across all dates for speed.
+
+### Ad-hoc (field-bot-adhoc.mjs)
+
+```bash
+# Single date
+node scripts/field-bot-adhoc.mjs 2026-04-15
+
+# Date range (inclusive)
+node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18
+
+# With discovery mode
+node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18 --discover
 ```
+
+All dates are validated at startup: must be >= 15 days from today or the script
+exits with an error. The `MIN_DAYS_OUT` constant lives in `field-config.mjs`.
 
 ---
 

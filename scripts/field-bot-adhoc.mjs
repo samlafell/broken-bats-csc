@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * Ad-hoc Field Scraper — Scrapes Raleigh Parks WebTrac for a specific date.
+ * Ad-hoc Field Scraper — Scrapes Raleigh Parks WebTrac for specific dates.
  *
  * Unlike field-bot-local.mjs (daily cron), this module exports a
  * `scrapeForDate()` function that the Discord bot can call on demand.
- * It also works standalone: `node scripts/field-bot-adhoc.mjs 2026-04-15`
+ *
+ * CLI usage:
+ *   node scripts/field-bot-adhoc.mjs 2026-04-15                  # single date
+ *   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18       # date range
+ *   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18 --discover
+ *
+ * All dates must be at least 15 days from today (Raleigh Parks lockout).
  *
  * Env vars:
  *   ADMIN_PASSWORD  (required) — Admin password for the Broken Bats API
@@ -17,9 +23,11 @@
 import puppeteer from 'puppeteer';
 import {
   TRACKED_FIELDS,
+  MIN_DAYS_OUT,
   fetchAliases,
   saveAliases,
   parseResultsInBrowser,
+  parseDateRange,
 } from './field-config.mjs';
 
 const WEBTRAC_BASE = 'https://ncraleighweb.myvscloud.com/webtrac/web';
@@ -281,18 +289,48 @@ export async function scrapeForDate(isoDate, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// CLI entry point: node scripts/field-bot-adhoc.mjs 2026-04-15 [--discover]
+// CLI entry point:
+//   node scripts/field-bot-adhoc.mjs 2026-04-15                  # single date
+//   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18       # date range
+//   node scripts/field-bot-adhoc.mjs 2026-04-15 --discover
 // ---------------------------------------------------------------------------
 
 const isMain = !process.argv[1] || process.argv[1].endsWith('field-bot-adhoc.mjs');
-if (isMain && process.argv[2] && !process.argv[2].startsWith('-')) {
-  const discover = process.argv.includes('--discover');
-  scrapeForDate(process.argv[2], { discover })
-    .then(({ results }) => {
-      console.log(`\nDone — ${results.length} slots scraped.`);
-    })
-    .catch((err) => {
-      console.error(`Fatal: ${err.message}`);
-      process.exit(1);
-    });
+if (isMain) {
+  const args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+  const flags = process.argv.slice(2).filter((a) => a.startsWith('-'));
+  const discover = flags.includes('--discover');
+
+  if (args.length === 0) {
+    console.error(`Usage: node field-bot-adhoc.mjs <start-date> [end-date] [--discover]`);
+    console.error(`  Dates must be YYYY-MM-DD and at least ${MIN_DAYS_OUT} days from today.`);
+    process.exit(1);
+  }
+
+  let dates;
+  try {
+    dates = parseDateRange(args[0], args[1]);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  console.log(`Scraping ${dates.length} date(s): ${dates[0]}${dates.length > 1 ? ` → ${dates[dates.length - 1]}` : ''}`);
+
+  (async () => {
+    let totalSlots = 0;
+    for (let i = 0; i < dates.length; i++) {
+      console.log(`\n[${i + 1}/${dates.length}] ${dates[i]}`);
+      try {
+        const { results } = await scrapeForDate(dates[i], { discover });
+        totalSlots += results.length;
+      } catch (err) {
+        console.error(`  Failed: ${err.message}`);
+      }
+    }
+    console.log(`\nDone — ${dates.length} date(s), ${totalSlots} total slots scraped.`);
+  })().catch((err) => {
+    console.error(`Fatal: ${err.message}`);
+    process.exit(1);
+  });
 }

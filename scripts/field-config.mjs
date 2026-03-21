@@ -6,6 +6,9 @@
  * place.
  */
 
+// Raleigh Parks locks availability at ~14 days out; day 15 is the first usable day.
+export const MIN_DAYS_OUT = 15;
+
 // Bobby's 25-field list (updated March 2026)
 export const TRACKED_FIELDS = [
   'Baileywick 1', 'Baileywick 2', 'Biltmore Hills 2',
@@ -210,4 +213,75 @@ export function parseResultsInBrowser(ctx) {
   }
 
   return { results, allNames, locations, newAliases, unmatchedFacilities };
+}
+
+// ---------------------------------------------------------------------------
+// Date helpers
+// ---------------------------------------------------------------------------
+
+function todayEastern() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+}
+
+function toIso(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Generate an array of ISO date strings for the daily cron range (+15 to +maxDaysOut). */
+export function getDailyDateRange(maxDaysOut = 40) {
+  const today = todayEastern();
+  const dates = [];
+  for (let offset = MIN_DAYS_OUT; offset <= maxDaysOut; offset++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + offset);
+    dates.push(toIso(d));
+  }
+  return dates;
+}
+
+/**
+ * Expand a CLI date specification into an array of ISO date strings.
+ * Accepts:
+ *   "2026-04-15"                 → single date
+ *   "2026-04-15" "2026-06-15"    → inclusive range (startDate, endDate)
+ *
+ * Throws if any date is fewer than MIN_DAYS_OUT days from today.
+ */
+export function parseDateRange(startStr, endStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr)) {
+    throw new Error(`Invalid start date "${startStr}" — expected YYYY-MM-DD`);
+  }
+
+  const today = todayEastern();
+  today.setHours(0, 0, 0, 0);
+
+  const start = new Date(startStr + 'T12:00:00');
+  const diffDays = Math.round((start - today) / 86_400_000);
+  if (diffDays < MIN_DAYS_OUT) {
+    throw new Error(
+      `Start date ${startStr} is only ${diffDays} days from today — minimum is ${MIN_DAYS_OUT}`
+    );
+  }
+
+  if (!endStr) return [startStr];
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+    throw new Error(`Invalid end date "${endStr}" — expected YYYY-MM-DD`);
+  }
+
+  const end = new Date(endStr + 'T12:00:00');
+  if (end < start) {
+    throw new Error(`End date ${endStr} is before start date ${startStr}`);
+  }
+
+  const dates = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(toIso(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
 }
