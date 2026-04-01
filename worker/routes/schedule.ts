@@ -9,7 +9,7 @@ schedule.get('/', async (c) => {
 
   if (next === 'true') {
     const result = await c.env.DB.prepare(
-      "SELECT * FROM games WHERE result IS NULL ORDER BY date ASC, time ASC LIMIT 1"
+      "SELECT * FROM games WHERE result IS NULL AND date >= date('now') ORDER BY date ASC, time ASC LIMIT 1"
     ).first();
     return c.json(result ?? null);
   }
