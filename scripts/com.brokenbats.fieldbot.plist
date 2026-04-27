@@ -20,7 +20,7 @@
     <key>ADMIN_PASSWORD</key>
     <string>admin123</string>
     <key>HEADLESS</key>
-    <string>false</string>
+    <string>true</string>
     <key>PATH</key>
     <string>/Users/sam/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>

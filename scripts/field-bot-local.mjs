@@ -35,6 +35,20 @@ const DISCOVER = process.env.DISCOVER === 'true' || process.argv.includes('--dis
 const MAX_PAGES = 5;
 const MAX_DAYS_OUT = 40;
 
+const STEALTH_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const LAUNCH_OPTIONS = {
+  headless: HEADLESS ? 'new' : false,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-blink-features=AutomationControlled',
+    '--window-size=1920,1080',
+  ],
+  ignoreDefaultArgs: ['--enable-automation'],
+};
+
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
@@ -159,10 +173,7 @@ async function main() {
   info(`Loaded ${aliasMap.size} existing aliases`);
   const aliasObj = Object.fromEntries(aliasMap);
 
-  const browser = await puppeteer.launch({
-    headless: HEADLESS ? 'new' : false,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  const browser = await puppeteer.launch(LAUNCH_OPTIONS);
 
   // Authenticate once up front
   const loginRes = await fetch(`${SITE_URL}/api/auth/login`, {
@@ -183,6 +194,7 @@ async function main() {
 
   try {
     const page = await browser.newPage();
+    await page.setUserAgent(STEALTH_USER_AGENT);
     await page.setViewport({ width: 1920, height: 1080 });
 
     // Get CSRF token once

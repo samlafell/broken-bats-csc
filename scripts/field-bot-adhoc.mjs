@@ -33,6 +33,9 @@ import {
 const WEBTRAC_BASE = 'https://ncraleighweb.myvscloud.com/webtrac/web';
 const MAX_PAGES = 5;
 
+const STEALTH_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
 // ---------------------------------------------------------------------------
 // ISO → US date format
 // ---------------------------------------------------------------------------
@@ -90,7 +93,13 @@ export async function scrapeForDate(isoDate, opts = {}) {
 
   const browser = await puppeteer.launch({
     headless: headless ? 'new' : false,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1920,1080',
+    ],
+    ignoreDefaultArgs: ['--enable-automation'],
   });
 
   let allResults = [];
@@ -100,6 +109,7 @@ export async function scrapeForDate(isoDate, opts = {}) {
 
   try {
     const page = await browser.newPage();
+    await page.setUserAgent(STEALTH_USER_AGENT);
     await page.setViewport({ width: 1920, height: 1080 });
 
     _info('Loading initial search page...');
