@@ -183,32 +183,44 @@ export function parseResultsInBrowser(ctx) {
       locations.push({ fieldName: matched, mapUrl: mapLink.href });
     }
 
+    const TIME_RANGE_RE = /(\d{1,2}:\d{2}\s*[ap]m\s*-\s*\d{1,2}:\d{2}\s*[ap]m)/i;
+    const seenSlots = new Set();
+
+    function normalizeTimeSlot(raw) {
+      const cleaned = raw.replace(/unavailable/gi, '').replace(/\s+/g, ' ').trim();
+      const match = cleaned.match(TIME_RANGE_RE);
+      return match ? match[1].replace(/\s+/g, ' ') : null;
+    }
+
+    function addSlot(timeSlot, status) {
+      const key = `${matched}|${timeSlot}`;
+      if (seenSlots.has(key)) return;
+      seenSlots.add(key);
+      results.push({ fieldName: matched, timeSlot, status });
+    }
+
     // Available / booked <a> tags
     const slotLinks = block.querySelectorAll('a.cart-button--state-block');
     for (const link of slotLinks) {
-      const timeText = link.textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(timeText)) continue;
-
-      results.push({
-        fieldName: matched,
-        timeSlot: timeText.replace(/\s+/g, ' '),
-        status: link.classList.contains('success') ? 'Available' : 'Booked',
-      });
+      const timeSlot = normalizeTimeSlot(link.textContent.trim());
+      if (!timeSlot) continue;
+      addSlot(timeSlot, link.classList.contains('success') ? 'Available' : 'Booked');
     }
 
     // Unavailable <span> pairs (fallback pattern)
     const spans = block.querySelectorAll('span');
     for (let i = 0; i < spans.length; i++) {
       const spanText = spans[i].textContent.trim();
-      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(spanText)) continue;
       const nextText = spans[i + 1]?.textContent?.trim() ?? '';
-      if (nextText.toLowerCase() === 'unavailable') {
-        results.push({
-          fieldName: matched,
-          timeSlot: spanText.replace(/\s+/g, ' '),
-          status: 'Booked',
-        });
-      }
+      const isUnavailable =
+        nextText.toLowerCase() === 'unavailable' ||
+        /unavailable$/i.test(spanText);
+
+      if (!isUnavailable) continue;
+
+      const timeSlot = normalizeTimeSlot(spanText);
+      if (!timeSlot) continue;
+      addSlot(timeSlot, 'Booked');
     }
   }
 

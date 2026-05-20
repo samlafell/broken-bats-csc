@@ -46,8 +46,13 @@ fields.post('/import', requireAuth('admin'), async (c) => {
   }
 
   if (body.results.length > 0) {
+    // Replace all scraper-owned rows for this date so stale/malformed slots don't linger.
+    await c.env.DB.prepare('DELETE FROM fields WHERE date = ?')
+      .bind(body.targetDate)
+      .run();
+
     const stmt = c.env.DB.prepare(
-      `INSERT OR REPLACE INTO fields (name, date, time_slot, status, last_updated)
+      `INSERT INTO fields (name, date, time_slot, status, last_updated)
        VALUES (?, ?, ?, ?, datetime('now'))`
     );
     const batch = body.results.map((r) =>
@@ -125,6 +130,14 @@ fields.get('/scrape-runs', requireAuth('admin'), async (c) => {
     .bind(limit)
     .all();
   return c.json(results);
+});
+
+/** Remove malformed rows where WebTrac "Unavailable" text was captured in time_slot. */
+fields.delete('/cleanup/malformed', requireAuth('admin'), async (c) => {
+  const result = await c.env.DB.prepare(
+    `DELETE FROM fields WHERE time_slot LIKE '%Unavailable%'`
+  ).run();
+  return c.json({ deleted: result.meta.changes ?? 0 });
 });
 
 export default fields;

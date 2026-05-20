@@ -120,6 +120,9 @@ node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18
 
 # With discovery mode
 node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18 --discover
+
+# Scrape only — no API/database writes
+node scripts/field-bot-adhoc.mjs 2026-04-15 --no-push
 ```
 
 All dates are validated at startup: must be >= 15 days from today or the script

@@ -10,6 +10,7 @@
  *   node scripts/field-bot-adhoc.mjs 2026-04-15                  # single date
  *   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18       # date range
  *   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18 --discover
+ *   node scripts/field-bot-adhoc.mjs 2026-04-15 --no-push
  *
  * All dates must be at least 15 days from today (Raleigh Parks lockout).
  *
@@ -303,6 +304,7 @@ export async function scrapeForDate(isoDate, opts = {}) {
 //   node scripts/field-bot-adhoc.mjs 2026-04-15                  # single date
 //   node scripts/field-bot-adhoc.mjs 2026-04-15 2026-06-18       # date range
 //   node scripts/field-bot-adhoc.mjs 2026-04-15 --discover
+//   node scripts/field-bot-adhoc.mjs 2026-04-15 --no-push
 // ---------------------------------------------------------------------------
 
 const isMain = !process.argv[1] || process.argv[1].endsWith('field-bot-adhoc.mjs');
@@ -310,10 +312,12 @@ if (isMain) {
   const args = process.argv.slice(2).filter((a) => !a.startsWith('-'));
   const flags = process.argv.slice(2).filter((a) => a.startsWith('-'));
   const discover = flags.includes('--discover');
+  const noPush = flags.includes('--no-push');
 
   if (args.length === 0) {
-    console.error(`Usage: node field-bot-adhoc.mjs <start-date> [end-date] [--discover]`);
+    console.error(`Usage: node field-bot-adhoc.mjs <start-date> [end-date] [--discover] [--no-push]`);
     console.error(`  Dates must be YYYY-MM-DD and at least ${MIN_DAYS_OUT} days from today.`);
+    console.error(`  --no-push  Scrape WebTrac only; do not write to the API/database.`);
     process.exit(1);
   }
 
@@ -325,14 +329,14 @@ if (isMain) {
     process.exit(1);
   }
 
-  console.log(`Scraping ${dates.length} date(s): ${dates[0]}${dates.length > 1 ? ` → ${dates[dates.length - 1]}` : ''}`);
+  console.log(`Scraping ${dates.length} date(s): ${dates[0]}${dates.length > 1 ? ` → ${dates[dates.length - 1]}` : ''}${noPush ? ' (no-push)' : ''}`);
 
   (async () => {
     let totalSlots = 0;
     for (let i = 0; i < dates.length; i++) {
       console.log(`\n[${i + 1}/${dates.length}] ${dates[i]}`);
       try {
-        const { results } = await scrapeForDate(dates[i], { discover });
+        const { results } = await scrapeForDate(dates[i], { discover, pushToApi: !noPush });
         totalSlots += results.length;
       } catch (err) {
         console.error(`  Failed: ${err.message}`);
